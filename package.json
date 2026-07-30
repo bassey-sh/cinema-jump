@@ -1,0 +1,10 @@
+{
+  "name": "cinema-jump",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ユナイテッド・シネマの座席選択ページへ直行するリダイレクタ",
+  "engines": {
+    "node": "24.x"
+  }
+}

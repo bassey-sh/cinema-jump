@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>cinema-jump</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 14px;
+    background: #111; color: #eee; line-height: 1.6; max-width: 720px; margin-inline: auto;
+  }
+  h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: .04em; }
+  .sub { color: #777; font-size: 12px; margin-bottom: 14px; }
+  .row { display: flex; gap: 8px; margin-bottom: 10px; }
+  select, input {
+    background: #1c1c1c; color: #eee; border: 1px solid #383838; border-radius: 8px;
+    padding: 10px; font-size: 16px; font-family: inherit; width: 100%;
+  }
+  select:focus, input:focus { outline: none; border-color: #2a6; }
+  .sale { background: #16221c; border: 1px solid #2a6; border-radius: 8px;
+          padding: 9px 11px; font-size: 13px; margin-bottom: 12px; }
+  .sale b { color: #6d8; }
+  .sale .note { color: #789; font-size: 11px; }
+  .item {
+    background: #1a1a1a; border: 1px solid #2c2c2c; border-radius: 9px;
+    padding: 11px 12px; margin-bottom: 7px; cursor: pointer;
+  }
+  .item:active { background: #232323; }
+  .item .fmt { color: #7a9; font-size: 12px; }
+  .scr { display: flex; align-items: center; gap: 10px; }
+  .scr .t { font-size: 19px; font-weight: 600; min-width: 62px; }
+  .scr .meta { color: #777; font-size: 12px; flex: 1; }
+  .badge { font-size: 11px; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+  .onsale { background: #1c4; color: #041; font-weight: 700; }
+  .presale { background: #e92; color: #310; font-weight: 700; }
+  .before { background: #294055; color: #9cf; }
+  .closed { background: #2a2a2a; color: #777; }
+  .btns { display: flex; gap: 7px; margin-top: 9px; }
+  .btn {
+    flex: 1; text-align: center; padding: 9px; border-radius: 7px; font-size: 13px;
+    text-decoration: none; border: 1px solid #383838; background: #222; color: #ccc;
+    cursor: pointer; font-family: inherit;
+  }
+  .btn.go { background: #2a6; border-color: #2a6; color: #fff; font-weight: 600; }
+  .btn:disabled { opacity: .4; }
+  .back { color: #6cf; cursor: pointer; font-size: 13px; display: inline-block; margin-bottom: 10px; }
+  .msg { color: #888; padding: 18px 2px; font-size: 14px; }
+  .err { color: #f77; }
+  .head { font-size: 14px; font-weight: 600; margin: 4px 0 10px; }
+</style>
+
+<h1>cinema-jump</h1>
+<div class="sub">ユナイテッド・シネマの座席選択ページへ直行する</div>
+
+<div id="picker">
+  <div class="row">
+    <select id="theater"><option>読み込み中…</option></select>
+  </div>
+  <div class="row">
+    <input type="date" id="date">
+  </div>
+  <div class="row">
+    <input type="search" id="filter" placeholder="作品名で絞り込み（任意）">
+  </div>
+</div>
+
+<div id="sale"></div>
+<div id="list"><div class="msg">読み込み中…</div></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const S = { theater: localStorage.getItem('cj.theater') || 'urasoe', date: null, films: [], film: null };
+
+const fmtDate = (d) => d.toISOString().slice(0, 10);
+const WD = ['日','月','火','水','木','金','土'];
+const LABEL = { onsale: '販売中', presale: '会員先行', before: '販売前', closed: '対象外' };
+
+// 会員（CLUB-SPICE）販売開始：上映日の3日前 21:00 ※実測からの推定
+function saleStart(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() - 3);
+  return `${d.getMonth() + 1}/${d.getDate()}(${WD[d.getDay()]}) 21:00`;
+}
+
+async function api(params) {
+  const q = new URLSearchParams({ ...params, json: '1' });
+  const r = await fetch('/api/go?' + q);
+  const j = await r.json().catch(() => ({ error: 'レスポンスが読めなかった' }));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+
+async function loadTheaters() {
+  try {
+    const { theaters } = await (await fetch('/api/theaters')).json();
+    $('theater').innerHTML = theaters
+      .filter((t) => !t.comingSoon)
+      .map((t) => `<option value="${t.slug}"${t.slug === S.theater ? ' selected' : ''}>${t.name}</option>`)
+      .join('');
+  } catch {
+    $('theater').innerHTML = `<option value="urasoe">PARCO CITY 浦添</option>`;
+  }
+}
+
+async function loadFilms() {
+  S.film = null;
+  $('sale').innerHTML = `<div class="sale">
+      会員販売開始（推定）: <b>${saleStart(S.date)}</b>
+      <div class="note">※ 上映日3日前の21:00。実測からの推定で公式確認は未取得</div></div>`;
+  $('list').innerHTML = '<div class="msg">読み込み中…</div>';
+  try {
+    const j = await api({ th: S.theater, d: S.date });
+    S.films = j.films;
+    renderFilms();
+  } catch (e) {
+    S.films = [];
+    $('list').innerHTML = `<div class="msg err">${e.message}</div>`;
+  }
+}
+
+function renderFilms() {
+  const kw = $('filter').value.trim();
+  const list = kw ? S.films.filter((f) => f.name.includes(kw)) : S.films;
+  $('picker').style.display = '';
+  if (!list.length) return ($('list').innerHTML = '<div class="msg">該当作品なし</div>');
+  $('list').innerHTML =
+    `<div class="head">${list.length}件</div>` +
+    list.map((f) => `<div class="item" data-film="${f.film}">${f.name}</div>`).join('');
+  document.querySelectorAll('[data-film]').forEach((el) =>
+    el.onclick = () => loadScreenings(el.dataset.film));
+}
+
+async function loadScreenings(film) {
+  $('picker').style.display = 'none';
+  $('list').innerHTML = '<div class="msg">読み込み中…</div>';
+  try {
+    const j = await api({ th: S.theater, d: S.date, f: film });
+    S.film = j;
+    $('list').innerHTML =
+      `<div class="back" id="back">← 作品一覧へ戻る</div>
+       <div class="head">${j.name}<br><span style="color:#777;font-weight:400">${S.date}</span></div>` +
+      (j.screenings.length ? j.screenings.map((s) => `
+        <div class="item" style="cursor:default">
+          <div class="scr">
+            <div class="t">${s.time}</div>
+            <div class="meta">～${s.end} ／ SCR ${s.screen}</div>
+            <span class="badge ${s.status}">${LABEL[s.status] || '-'}${s.seat ? ' ' + s.seat : ''}</span>
+          </div>
+          <div class="btns">
+            ${s.onSale
+              ? `<a class="btn go" href="${s.bookmark}">${s.status === 'presale' ? '会員先行購入へ' : '座席選択へ'}</a>`
+              : `<button class="btn" disabled>${s.status === 'before' ? '販売開始前' : '販売対象外'}</button>`}
+            <button class="btn copy" data-url="${s.bookmark}">URLをコピー</button>
+          </div>
+        </div>`).join('')
+        : '<div class="msg">上映回が取得できなかった</div>');
+    $('back').onclick = renderFilms;
+    document.querySelectorAll('.copy').forEach((b) => b.onclick = async () => {
+      try { await navigator.clipboard.writeText(b.dataset.url); b.textContent = 'コピーした ✓'; }
+      catch { b.textContent = b.dataset.url; }
+      setTimeout(() => { b.textContent = 'URLをコピー'; }, 1600);
+    });
+  } catch (e) {
+    $('list').innerHTML = `<div class="back" id="back">← 戻る</div><div class="msg err">${e.message}</div>`;
+    $('back').onclick = renderFilms;
+  }
+}
+
+// --- init ---
+const today = new Date();
+S.date = fmtDate(today);
+$('date').value = S.date;
+$('theater').onchange = (e) => {
+  S.theater = e.target.value; localStorage.setItem('cj.theater', S.theater); loadFilms();
+};
+$('date').onchange = (e) => { S.date = e.target.value; loadFilms(); };
+$('filter').oninput = () => { if (!S.film) renderFilms(); };
+
+loadTheaters().then(loadFilms);
+</script>
+</html>
