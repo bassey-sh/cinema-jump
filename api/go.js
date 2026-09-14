@@ -1,13 +1,18 @@
-// ユナイテッド・シネマ 座席選択ページ ダイレクトジャンプ
+// 座席選択ページ ダイレクトジャンプ
 //
-// 販売開始と同時に生成される mc（購入システム側の作品ID）を
-// 上映スケジュールHTMLから抜き出して、座席選択ページへ 302 で飛ばす。
+// 対応チェーン
+//   ユナイテッド・シネマ : 販売開始と同時に生成される mc（購入システム側の作品ID）を
+//                         上映スケジュールHTMLから抜き出して、座席選択ページへ 302 で飛ばす。
+//   スターシアターズ     : 上映回ごとの eventId をスケジュールJSONから引いて飛ばす（lib/startheaters.js）
 //
 //   /api/go?th=urasoe&d=2026-07-31                        → その日の作品一覧
 //   /api/go?th=urasoe&d=2026-07-31&q=スパイダー IMAX 字幕  → 上映回一覧＋ブックマーク用URL
 //   /api/go?th=urasoe&d=2026-07-31&f=22072&t=10:50        → 販売中なら座席選択へ直行
+//   /api/go?th=st-cinemaq&d=2026-09-17&f=15692&t=14:35    → スターシアターズ（シネマQ）も同じ形式
 //
 // &json=1 を付けると常に JSON で返る。
+
+import { isStarTheater, loadStar } from '../lib/startheaters.js';
 
 const UA = 'Mozilla/5.0 (compatible; cinema-jump/1.0)';
 
@@ -20,30 +25,18 @@ export default async function handler(req, res) {
   if (f && !/^\d+$/.test(f)) return fail(res, 400, 'f は数字');
   if (t && !/^\d{1,2}:\d{2}$/.test(t)) return fail(res, 400, 't は HH:MM で指定しろ');
 
-  const sd = d.replace(/-/g, '');
   const origin = `https://${req.headers.host}`;
   const wantJson = json === '1';
 
-  // --- スケジュールHTML取得（Shift_JIS） ---
-  let html;
+  // --- チェーンごとにスケジュールを読む ---
+  // src = { films, screeningsOf(film), jumpUrl(screening) }
+  let src;
   try {
-    const r = await fetch(`https://www.unitedcinemas.jp/${th}/daily.php?date=${d}`, {
-      headers: { 'User-Agent': UA }, cache: 'no-store',
-    });
-    if (!r.ok) return fail(res, 502, `スケジュール取得に失敗 (HTTP ${r.status})`);
-    html = new TextDecoder('shift_jis').decode(await r.arrayBuffer());
+    src = isStarTheater(th) ? await loadStar(th, d) : await loadUnited(th, d);
   } catch (e) {
-    return fail(res, 502, `スケジュール取得に失敗: ${e.message}`);
+    return fail(res, e.status || 502, e.status ? e.message : `スケジュール取得に失敗: ${e.message}`);
   }
-
-  // --- その日の全作品（上映方式ごとに別レコード） ---
-  const films = [];
-  const seen = new Set();
-  for (const m of html.matchAll(/<a href="film\.php\?film=(\d+)[^"]*"[^>]*>([^<]+)<\/a>/g)) {
-    if (seen.has(m[1])) continue;
-    seen.add(m[1]);
-    films.push({ film: m[1], name: decodeEntities(m[2].trim()) });
-  }
+  const { films } = src;
   if (!films.length) return fail(res, 404, `${d} のスケジュールはまだ公開されていない`);
 
   // --- 対象作品の決定 ---
@@ -65,46 +58,9 @@ export default async function handler(req, res) {
     return ok(res, wantJson, { date: d, theater: th, films }, () => renderFilms(origin, th, d, films));
   }
 
-  // --- 対象作品ブロックを切り出す ---
-  const i = html.indexOf(`film=${target.film}`);
-  const j = html.indexOf('film.php?film=', i + 10);
-  const block = html.slice(i, j < 0 ? undefined : j);
-
-  // --- 販売中の回（購入リンクが生成されている＝mc 確定） ---
-  // 通常販売   : /all/cc.php        → /pticket/schedule.php へ転送される
-  // 会員先行販売: /clubspice/presale.php → そのまま叩く（CLUB-SPICE会員の先行期間）
-  const sold = {};
-  for (const m of block.matchAll(
-    /\/(all\/cc|clubspice\/presale)\.php\?tc=(\d+)&(?:amp;)?sd=(\d+)&(?:amp;)?sc=(\d+)&(?:amp;)?st=(\d+)&(?:amp;)?mc=(\d+)/g)) {
-    sold[m[5]] = { tc: m[2], sc: m[4], mc: m[6], presale: m[1].startsWith('clubspice') };
-  }
-
-  // --- スクリーンごとの上映回（販売前でも取得できる） ---
-  // 状態は3種。「まだ売ってない」と「もう終わった」は別物なので区別する。
-  //   onsale : cc.php が生成されている（＝mc確定・購入可）
-  //   before : outside_sales_period アイコン（＝販売期間外。まだ売り出されていない）
-  //   closed : btn_buy_disable（＝販売対象外。上映済み・締切・満席）
-  const screenings = [];
-  for (const seg of block.split(/<p class="screenNumber">/).slice(1)) {
-    const sc = ((seg.match(/screen_(\d+)_s\.gif/) || [])[1] || '').padStart(3, '0');
-    for (const cell of seg.split(/<li class="startTime">/).slice(1)) {
-      const time = (cell.match(/^\s*(\d{1,2}:\d{2})/) || [])[1];
-      if (!time) continue;
-      const chunk = cell.slice(0, 1500); // 次の回のHTMLを巻き込まない範囲
-      const end = (chunk.match(/<li class="endTime">\s*[～~]?\s*(\d{1,2}:\d{2})/) || [])[1] || '';
-      const st = sd + time.replace(':', '') + '00';
-      const hit = sold[st];
-      const status = hit ? (hit.presale ? 'presale' : 'onsale')
-        : /outside_sales_period/.test(chunk) ? 'before' : 'closed';
-      screenings.push({
-        time, end, screen: hit?.sc || sc, st, status,
-        onSale: !!hit,
-        seat: (chunk.match(/alt="\[([○△×□])\]"/) || [])[1] || null, // ○空席 △残少 ×満席 □対象外
-        mc: hit?.mc ?? null, tc: hit?.tc ?? null, presale: !!hit?.presale,
-        bookmark: `${origin}/api/go?th=${th}&d=${d}&f=${target.film}&t=${time}`,
-      });
-    }
-  }
+  const screenings = src.screeningsOf(target.film).map((s) => ({
+    ...s, bookmark: `${origin}/api/go?th=${th}&d=${d}&f=${target.film}&t=${s.time}`,
+  }));
 
   // --- 時刻指定なし → 上映回一覧（ブックマーク用URL付き） ---
   if (!t) {
@@ -119,16 +75,90 @@ export default async function handler(req, res) {
   }
   if (!hit.onSale) {
     const why = hit.status === 'before'
-      ? 'まだ販売前（mc未生成）'
+      ? (hit.saleStart ? `まだ販売前（${hit.saleStart} から購入可）` : 'まだ販売前（mc未生成）')
       : '販売対象外（上映済み・販売締切・満席のいずれか）';
     return fail(res, 503, `${why}：${target.name} ${d} ${t}`, { screenings });
   }
-  // 会員先行期間中は presale.php を直接叩く（cc.php はまだ生成されていない）
-  const path = hit.presale ? '/clubspice/presale.php' : '/pticket/schedule.php';
   // 外部サイト由来の遷移と判定されてトップへ飛ばされるのを避ける
   res.setHeader('Referrer-Policy', 'no-referrer');
-  res.redirect(302, `https://www.unitedcinemas.jp${path}`
-    + `?tc=${hit.tc}&sd=${sd}&sc=${hit.screen}&st=${hit.st}&mc=${hit.mc}`);
+  res.redirect(302, src.jumpUrl(hit));
+}
+
+// ---------- ユナイテッド・シネマ ----------
+
+async function loadUnited(th, d) {
+  const sd = d.replace(/-/g, '');
+
+  // --- スケジュールHTML取得（Shift_JIS） ---
+  const r = await fetch(`https://www.unitedcinemas.jp/${th}/daily.php?date=${d}`, {
+    headers: { 'User-Agent': UA }, cache: 'no-store',
+  });
+  if (!r.ok) throw Object.assign(new Error(`スケジュール取得に失敗 (HTTP ${r.status})`), { status: 502 });
+  const html = new TextDecoder('shift_jis').decode(await r.arrayBuffer());
+
+  // --- その日の全作品（上映方式ごとに別レコード） ---
+  const films = [];
+  const seen = new Set();
+  for (const m of html.matchAll(/<a href="film\.php\?film=(\d+)[^"]*"[^>]*>([^<]+)<\/a>/g)) {
+    if (seen.has(m[1])) continue;
+    seen.add(m[1]);
+    films.push({ film: m[1], name: decodeEntities(m[2].trim()) });
+  }
+
+  return { films, screeningsOf, jumpUrl };
+
+  function screeningsOf(film) {
+    // --- 対象作品ブロックを切り出す ---
+    const i = html.indexOf(`film=${film}`);
+    const j = html.indexOf('film.php?film=', i + 10);
+    const block = html.slice(i, j < 0 ? undefined : j);
+
+    // --- 販売中の回（購入リンクが生成されている＝mc 確定） ---
+    // 通常販売   : /all/cc.php        → /pticket/schedule.php へ転送される
+    // 会員先行販売: /clubspice/presale.php → そのまま叩く（CLUB-SPICE会員の先行期間）
+    const sold = {};
+    for (const m of block.matchAll(
+      /\/(all\/cc|clubspice\/presale)\.php\?tc=(\d+)&(?:amp;)?sd=(\d+)&(?:amp;)?sc=(\d+)&(?:amp;)?st=(\d+)&(?:amp;)?mc=(\d+)/g)) {
+      sold[m[5]] = { tc: m[2], sc: m[4], mc: m[6], presale: m[1].startsWith('clubspice') };
+    }
+
+    // --- スクリーンごとの上映回（販売前でも取得できる） ---
+    // 状態は3種。「まだ売ってない」と「もう終わった」は別物なので区別する。
+    //   onsale : cc.php が生成されている（＝mc確定・購入可）
+    //   before : outside_sales_period アイコン（＝販売期間外。まだ売り出されていない）
+    //   closed : btn_buy_disable（＝販売対象外。上映済み・締切・満席）
+    const screenings = [];
+    for (const seg of block.split(/<p class="screenNumber">/).slice(1)) {
+      const sc = ((seg.match(/screen_(\d+)_s\.gif/) || [])[1] || '').padStart(3, '0');
+      for (const cell of seg.split(/<li class="startTime">/).slice(1)) {
+        const time = (cell.match(/^\s*(\d{1,2}:\d{2})/) || [])[1];
+        if (!time) continue;
+        const chunk = cell.slice(0, 1500); // 次の回のHTMLを巻き込まない範囲
+        const end = (chunk.match(/<li class="endTime">\s*[～~]?\s*(\d{1,2}:\d{2})/) || [])[1] || '';
+        const st = sd + time.replace(':', '') + '00';
+        const hit = sold[st];
+        const status = hit ? (hit.presale ? 'presale' : 'onsale')
+          : /outside_sales_period/.test(chunk) ? 'before' : 'closed';
+        screenings.push({
+          time, end, screen: hit?.sc || sc, st, status,
+          onSale: !!hit,
+          seat: (chunk.match(/alt="\[([○△×□])\]"/) || [])[1] || null, // ○空席 △残少 ×満席 □対象外
+          mc: hit?.mc ?? null, tc: hit?.tc ?? null, presale: !!hit?.presale,
+        });
+      }
+    }
+    return screenings;
+  }
+
+  function jumpUrl(hit) {
+    // 通常販売は cc.php を入口にする。cc.php は Queue-it の待機列ゲートを通して
+    // 必要な cookie を確立させてから schedule.php へ戻す役割を持つ。
+    // schedule.php を直接叩くと cookie がなくトップページへ 302 される。
+    // 会員先行期間中は presale.php を直接叩く（cc.php はまだ生成されていない）
+    const path = hit.presale ? '/clubspice/presale.php' : '/all/cc.php';
+    return `https://www.unitedcinemas.jp${path}`
+      + `?tc=${hit.tc}&sd=${sd}&sc=${hit.screen}&st=${hit.st}&mc=${hit.mc}`;
+  }
 }
 
 // ---------- helpers ----------
@@ -181,8 +211,9 @@ function renderScreenings(th, d, target, screenings) {
   const LABEL = { onsale: '販売中', presale: '会員先行', before: '販売前', closed: '対象外' };
   const rows = screenings.map((s) => `<tr>
     <td><b>${s.time}</b><br><span style="color:#777;font-size:12px">～${s.end}</span></td>
-    <td>${s.screen}</td>
-    <td class="${s.onSale ? 'on' : 'off'}">${LABEL[s.status] || '-'}${s.seat ? ` ${s.seat}` : ''}</td>
+    <td>${esc(s.screen)}</td>
+    <td class="${s.onSale ? 'on' : 'off'}">${LABEL[s.status] || '-'}${s.seat ? ` ${s.seat}` : ''}
+        ${s.status === 'before' && s.saleStart ? `<br><span style="font-size:12px">${esc(s.saleStart)}〜</span>` : ''}</td>
     <td>${s.onSale ? `<a class="go" href="${esc(s.bookmark)}">座席へ</a>` : ''}
         <div class="bm">${esc(s.bookmark)}</div></td></tr>`).join('');
   return PAGE(`${target.name} / ${d}`,

@@ -86,3 +86,65 @@ line('⑤ HTML出力');
   console.log('status:', r._status, '/ Content-Type:', r._headers['Content-Type']);
   console.log('length:', String(r._body).length, '/ 販売前表示:', String(r._body).includes('販売前'));
 }
+
+// ---------- スターシアターズ（シネマQ） ----------
+// 購入開始は上映日2日前0:00（公式規約）なので、翌日＝販売中、3日後＝販売前 が期待値
+const jstDate = (plus) => new Date(Date.now() + 9 * 3600e3 + plus * 86400e3).toISOString().slice(0, 10);
+
+// 6) 作品一覧 → 上映回 → 販売中の回にジャンプ
+line('⑥ シネマQ 作品一覧 ' + jstDate(1));
+{
+  const d = jstDate(1);
+  const r = await call({ th: 'st-cinemaq', d, json: '1' });
+  console.log('status:', r._status, '/ 作品数:', r._body?.films?.length, r._body?.error || '');
+  console.log(r._body?.films?.slice(0, 5));
+
+  const film = r._body?.films?.find((x) => !x.name.includes('メンバーズカード'))?.film;
+  if (film) {
+    line('⑦ シネマQ 上映回 film=' + film);
+    const s = await call({ th: 'st-cinemaq', d, f: film, json: '1' });
+    console.log(s._body?.name);
+    console.table(s._body?.screenings?.map(({ time, end, screen, status, seat, remain, max, saleStart, id }) =>
+      ({ time, end, screen, status, seat, remain, max, saleStart, id })));
+
+    const hit = s._body?.screenings?.find((x) => x.status === 'onsale');
+    line('⑧ シネマQ 販売中の回にジャンプ');
+    if (hit) {
+      const j = await call({ th: 'st-cinemaq', d, f: film, t: hit.time });
+      console.log('status:', j._status, '/ Referrer-Policy:', j._headers['Referrer-Policy']);
+      console.log('redirect:', j._redirect || j._body);
+    } else {
+      console.log('販売中の回がない（上映終了後の時間帯なら正常）');
+    }
+  }
+}
+
+// 9) 販売前の回を指定 → 503 と購入開始日時が返るか
+line('⑨ シネマQ 販売前の回 ' + jstDate(3));
+{
+  const d = jstDate(3);
+  const r = await call({ th: 'st-cinemaq', d, json: '1' });
+  console.log('status:', r._status, '/ 作品数:', r._body?.films?.length, r._body?.error || '');
+  const film = r._body?.films?.[0]?.film;
+  if (film) {
+    const s = await call({ th: 'st-cinemaq', d, f: film, json: '1' });
+    const before = s._body?.screenings?.find((x) => x.status === 'before');
+    if (before) {
+      const j = await call({ th: 'st-cinemaq', d, f: film, t: before.time });
+      console.log('status:', j._status, '/', j._body?.error);
+      console.log('direct:', before.direct);
+    } else {
+      console.log('販売前の回なし:', s._body?.screenings?.map((x) => x.status));
+    }
+  }
+}
+
+// 10) 劇場一覧にスターシアターズが入っているか
+line('⑩ 劇場一覧 スターシアターズ');
+{
+  const { default: theaters } = await import('./api/theaters.js');
+  const res = mockRes();
+  await theaters({ query: {} }, res);
+  console.log(res._body?.theaters?.filter((t) => t.chain === 'star'));
+  console.log('error:', res._body?.error ?? 'なし');
+}
