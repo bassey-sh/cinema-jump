@@ -35,6 +35,8 @@ export default async function handler(req, res) {
   const theaters = [...united, ...await chainTheaters()]
     .map((t) => ({ ...t, chainLabel: CHAIN_LABEL[t.chain] || t.chain }));
 
-  if (!error) res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=604800');
+  // ブラウザには毎回確認させ（劇場が増えたときに古い一覧を掴み続けないように）、
+  // CDN側では1日キャッシュさせる。max-age を省くとブラウザが古い応答を持ち続けることがある
+  if (!error) res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate, s-maxage=86400, stale-while-revalidate=604800');
   res.json({ count: theaters.length, theaters, ...(error && { error }) });
 }

@@ -5,65 +5,138 @@
 <meta name="referrer" content="no-referrer">
 <title>cinema-jump</title>
 <style>
-  :root { color-scheme: dark; }
+  /* 速度優先の道具なので、外部フォント・画像・ライブラリは一切使わない。
+     影やぼかしも最小限（販売開始の瞬間に描画で待たされたら本末転倒） */
+  :root {
+    color-scheme: dark;
+    --bg: #0d0f12;
+    --surface: #16191e;
+    --surface2: #1b1f26;
+    --line: #262b33;
+    --text: #e8eaed;
+    --muted: #8a919c;
+    --accent: #e8b44a;      /* 場内の照明みたいな琥珀色 */
+    --go: #1fae6a;          /* 買える */
+    --warn: #e8913a;        /* 会員先行・残りわずか */
+    --info: #5aa9e6;        /* まだ売っていない */
+    --bad: #e05a5a;         /* 満席 */
+  }
   * { box-sizing: border-box; }
   body {
-    font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 14px;
-    background: #111; color: #eee; line-height: 1.6; max-width: 720px; margin-inline: auto;
+    font-family: system-ui, -apple-system, sans-serif; margin: 0;
+    padding: 0 14px 28px; background: var(--bg); color: var(--text);
+    line-height: 1.6; max-width: 720px; margin-inline: auto;
   }
-  h1 { font-size: 16px; margin: 0 0 2px; letter-spacing: .04em; }
-  .sub { color: #777; font-size: 12px; margin-bottom: 14px; }
-  .row { display: flex; gap: 8px; margin-bottom: 10px; }
+
+  /* ヘッダー：フィルムの帯をグラデーションで描く（画像なし） */
+  header { padding: 16px 0 12px; }
+  h1 {
+    font-size: 17px; margin: 0; letter-spacing: .08em; font-weight: 700;
+    display: flex; align-items: center; gap: 9px;
+  }
+  h1::before {
+    content: ''; width: 5px; height: 19px; border-radius: 2px;
+    background: repeating-linear-gradient(180deg, var(--accent) 0 4px, transparent 4px 7px);
+  }
+  .sub { color: var(--muted); font-size: 12px; margin: 3px 0 0 14px; }
+
+  /* 劇場・日付は上に貼り付けておく（スクロールしても切り替えられる） */
+  #picker {
+    position: sticky; top: 0; z-index: 2; background: var(--bg);
+    padding: 8px 0 10px; border-bottom: 1px solid var(--line);
+  }
+  .row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .row:last-child { margin-bottom: 0; }
   select, input {
-    background: #1c1c1c; color: #eee; border: 1px solid #383838; border-radius: 8px;
-    padding: 10px; font-size: 16px; font-family: inherit; width: 100%;
+    background: var(--surface); color: var(--text); border: 1px solid var(--line);
+    border-radius: 9px; padding: 11px; font-size: 16px; font-family: inherit; width: 100%;
   }
-  select:focus, input:focus { outline: none; border-color: #2a6; }
-  .sale { background: #16221c; border: 1px solid #2a6; border-radius: 8px;
-          padding: 9px 11px; font-size: 13px; margin-bottom: 12px; }
-  .sale b { color: #6d8; }
-  .sale .note { color: #789; font-size: 11px; }
+  select:focus, input:focus { outline: none; border-color: var(--accent); }
+  .narrow { flex: 0 0 42%; }
+  #theater { font-weight: 600; }
+
+  .sale {
+    background: linear-gradient(180deg, #1a1b16, var(--surface));
+    border: 1px solid #3a3524; border-left: 3px solid var(--accent);
+    border-radius: 9px; padding: 10px 12px; font-size: 13px; margin: 14px 0 12px;
+  }
+  .sale b { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .sale .note { color: var(--muted); font-size: 11px; margin-top: 2px; }
+
+  .head {
+    font-size: 15px; font-weight: 700; margin: 16px 0 10px;
+    display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  }
+  .head .count { color: var(--muted); font-size: 12px; font-weight: 400; }
+
   .item {
-    background: #1a1a1a; border: 1px solid #2c2c2c; border-radius: 9px;
-    padding: 11px 12px; margin-bottom: 7px; cursor: pointer;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; margin-bottom: 8px; cursor: pointer;
   }
-  .item:active { background: #232323; }
-  .item .fmt { color: #7a9; font-size: 12px; }
-  .scr { display: flex; align-items: center; gap: 10px; }
-  .scr .t { font-size: 19px; font-weight: 600; min-width: 62px; }
-  .scr .meta { color: #777; font-size: 12px; flex: 1; }
-  .badge { font-size: 11px; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
-  .onsale { background: #1c4; color: #041; font-weight: 700; }
-  .presale { background: #e92; color: #310; font-weight: 700; }
-  .before { background: #294055; color: #9cf; }
-  .closed { background: #2a2a2a; color: #777; }
-  .btns { display: flex; gap: 7px; margin-top: 9px; }
+  .item:active { background: var(--surface2); }
+  /* 作品一覧の行は左端に細い印を付けて、押せることを示す */
+  #list > .item { border-left: 3px solid #2f3540; }
+  #list > .item:active { border-left-color: var(--accent); }
+
+  .scr { display: flex; align-items: center; gap: 11px; }
+  .scr .t {
+    font-size: 21px; font-weight: 700; min-width: 66px;
+    font-variant-numeric: tabular-nums; letter-spacing: .01em;
+  }
+  .scr .meta { color: var(--muted); font-size: 12px; flex: 1; }
+  .seat { font-weight: 700; margin-left: 3px; }
+  .seat.ok { color: var(--go); }
+  .seat.few { color: var(--warn); }
+  .seat.full { color: var(--bad); }
+
+  .badge {
+    font-size: 11px; padding: 3px 9px; border-radius: 999px; white-space: nowrap;
+    font-weight: 700; border: 1px solid transparent;
+  }
+  .onsale { background: rgba(31,174,106,.16); color: #4fd894; border-color: rgba(31,174,106,.45); }
+  .presale { background: rgba(232,145,58,.16); color: #f0a95f; border-color: rgba(232,145,58,.45); }
+  .before { background: rgba(90,169,230,.14); color: #8fc6f0; border-color: rgba(90,169,230,.4); }
+  .closed { background: #1f242b; color: var(--muted); border-color: #2b313a; }
+
+  .btns { display: flex; gap: 7px; margin-top: 10px; }
   .btn {
-    flex: 1; text-align: center; padding: 9px; border-radius: 7px; font-size: 13px;
-    text-decoration: none; border: 1px solid #383838; background: #222; color: #ccc;
-    cursor: pointer; font-family: inherit;
+    flex: 1; text-align: center; padding: 10px 8px; border-radius: 8px; font-size: 13px;
+    text-decoration: none; border: 1px solid var(--line); background: var(--surface2);
+    color: #c8ccd3; cursor: pointer; font-family: inherit;
   }
-  .btn.go { background: #2a6; border-color: #2a6; color: #fff; font-weight: 600; }
-  .btn:disabled { opacity: .4; }
-  .back { color: #6cf; cursor: pointer; font-size: 13px; display: inline-block; margin-bottom: 10px; }
-  .msg { color: #888; padding: 18px 2px; font-size: 14px; }
-  .err { color: #f77; }
-  .head { font-size: 14px; font-weight: 600; margin: 4px 0 10px; }
-  .when { color: #9cf; font-size: 12px; margin-top: 5px; }
-  .note { color: #789; font-size: 11px; margin: 10px 2px; }
+  .btn:active { background: #232833; }
+  .btn.go {
+    background: var(--go); border-color: var(--go); color: #04170d; font-weight: 700;
+    flex: 1.4;
+  }
+  .btn.go:active { background: #1a9a5c; }
+  .btn:disabled { opacity: .45; cursor: default; }
+
+  .back {
+    color: var(--accent); cursor: pointer; font-size: 13px;
+    display: inline-block; margin: 14px 0 4px;
+  }
+  .msg { color: var(--muted); padding: 18px 2px; font-size: 14px; }
+  .err { color: #f08a8a; }
+  .when { color: #8fc6f0; font-size: 12px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .note { color: var(--muted); font-size: 11px; margin: 12px 2px; line-height: 1.5; }
 </style>
 
-<h1>cinema-jump</h1>
-<div class="sub">映画館の座席選択ページへ直行する</div>
+<header>
+  <h1>cinema-jump</h1>
+  <div class="sub">映画館の座席選択ページへ直行する</div>
+</header>
 
 <div id="picker">
   <div class="row">
-    <select id="theater"><option>読み込み中…</option></select>
+    <select id="chain" class="narrow"><option>読み込み中…</option></select>
+    <select id="theater"><option>…</option></select>
   </div>
   <div class="row">
-    <input type="date" id="date">
+    <input type="search" id="thfilter" placeholder="劇場を地名で検索（例: 横浜）">
   </div>
   <div class="row">
+    <input type="date" id="date" class="narrow">
     <input type="search" id="filter" placeholder="作品名で絞り込み（任意）">
   </div>
 </div>
@@ -73,13 +146,19 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const S = { theaters: [], theater: localStorage.getItem('cj.theater') || 'urasoe', date: null, films: [], film: null };
+const S = {
+  theaters: [],
+  theater: localStorage.getItem('cj.theater') || 'urasoe',
+  chain: localStorage.getItem('cj.chain') || '',
+  date: null, films: [], film: null,
+};
 
 // toISOString() は UTC なので、日本時間0:00〜9:00に前日が出てしまう。端末のローカル日付で組む
 const fmtDate = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const WD = ['日','月','火','水','木','金','土'];
 const LABEL = { onsale: '販売中', presale: '会員先行', before: '販売前', closed: '対象外' };
+const SEAT_CLASS = { '○': 'ok', '△': 'few', '×': 'full' };
 
 const PREFIX_CHAIN = { 'st-': 'star', 'cs-': 'sunshine', 'ae-': 'aeon', 'smt-': 'smt', 'c109-': 'c109', 'tj-': 'tjoy', 'toho-': 'toho' };
 const chainOf = () => (S.theaters.find((t) => t.slug === S.theater) || {}).chain
@@ -143,19 +222,65 @@ async function api(params) {
 async function loadTheaters() {
   try {
     const { theaters } = await (await fetch('/api/theaters')).json();
-    S.theaters = theaters;
-    const opt = (t) => `<option value="${t.slug}"${t.slug === S.theater ? ' selected' : ''}>${t.name}</option>`;
-    const labels = [...new Set(theaters.map((t) => t.chainLabel || t.chain))];
-    $('theater').innerHTML = labels.map((label) => {
-      const list = theaters.filter((t) => (t.chainLabel || t.chain) === label && !t.comingSoon);
-      return list.length ? `<optgroup label="${label}">${list.map(opt).join('')}</optgroup>` : '';
-    }).join('');
+    S.theaters = theaters.filter((t) => !t.comingSoon);
   } catch {
-    S.theaters = [];
-    $('theater').innerHTML = `<option value="urasoe">PARCO CITY 浦添</option><option value="st-cinemaq">シネマQ</option>`;
+    S.theaters = [
+      { slug: 'urasoe', name: 'PARCO CITY 浦添', chain: 'united', chainLabel: 'ユナイテッド・シネマ' },
+      { slug: 'st-cinemaq', name: 'シネマQ', chain: 'star', chainLabel: 'スターシアターズ（沖縄）' },
+    ];
   }
-  // 記憶していた劇場が一覧から消えていたら、先頭の劇場に合わせる
-  S.theater = $('theater').value || S.theater;
+  // いま選んでいる劇場の系列を初期値にする
+  const current = S.theaters.find((t) => t.slug === S.theater);
+  if (!S.chain) S.chain = current ? current.chain : 'all';
+  renderChains();
+  renderTheaters();
+}
+
+function chainList() {
+  const seen = new Map();
+  for (const t of S.theaters) if (!seen.has(t.chain)) seen.set(t.chain, t.chainLabel || t.chain);
+  return [...seen];
+}
+
+function renderChains() {
+  const counts = {};
+  for (const t of S.theaters) counts[t.chain] = (counts[t.chain] || 0) + 1;
+  $('chain').innerHTML =
+    `<option value="all"${S.chain === 'all' ? ' selected' : ''}>すべて（${S.theaters.length}）</option>`
+    + chainList().map(([id, label]) =>
+      `<option value="${id}"${id === S.chain ? ' selected' : ''}>${label}（${counts[id]}）</option>`).join('');
+}
+
+// 劇場の選択肢：キーワードがあれば系列をまたいで探す（地名で引けるように）
+function renderTheaters() {
+  const kw = $('thfilter').value.trim();
+  const hit = (t) => !kw || t.name.includes(kw) || (t.chainLabel || '').includes(kw);
+  const list = S.theaters.filter((t) => hit(t) && (kw || S.chain === 'all' || t.chain === S.chain));
+
+  if (!list.length) {
+    $('theater').innerHTML = '<option value="">該当する劇場なし</option>';
+    return;
+  }
+  const opt = (t, withChain) =>
+    `<option value="${t.slug}"${t.slug === S.theater ? ' selected' : ''}>${withChain ? `${t.name}` : t.name}</option>`;
+  // 系列をまたぐときだけ、どの系列かが分かるようにまとめる
+  const grouped = kw || S.chain === 'all';
+  $('theater').innerHTML = grouped
+    ? chainList().map(([id, label]) => {
+      const inChain = list.filter((t) => t.chain === id);
+      return inChain.length ? `<optgroup label="${label}">${inChain.map((t) => opt(t, true)).join('')}</optgroup>` : '';
+    }).join('')
+    : list.map((t) => opt(t, false)).join('');
+
+  // 選択中の劇場が候補から消えていたら先頭に切り替える
+  if (!list.some((t) => t.slug === S.theater)) {
+    S.theater = list[0].slug;
+    $('theater').value = S.theater;
+    localStorage.setItem('cj.theater', S.theater);
+    return true; // 劇場が変わった
+  }
+  $('theater').value = S.theater;
+  return false;
 }
 
 async function loadFilms() {
@@ -178,7 +303,7 @@ function renderFilms() {
   $('picker').style.display = '';
   if (!list.length) return ($('list').innerHTML = '<div class="msg">該当作品なし</div>');
   $('list').innerHTML =
-    `<div class="head">${list.length}件</div>` +
+    `<div class="head">上映作品<span class="count">${list.length}件</span></div>` +
     list.map((f) => `<div class="item" data-film="${f.film}">${f.name}</div>`).join('');
   document.querySelectorAll('[data-film]').forEach((el) =>
     el.onclick = () => loadScreenings(el.dataset.film));
@@ -192,13 +317,14 @@ async function loadScreenings(film) {
     S.film = j;
     $('list').innerHTML =
       `<div class="back" id="back">← 作品一覧へ戻る</div>
-       <div class="head">${j.name}<br><span style="color:#777;font-weight:400">${S.date}</span></div>` +
+       <div class="head">${j.name}<span class="count">${S.date}</span></div>` +
       (j.screenings.length ? j.screenings.map((s) => `
         <div class="item" style="cursor:default">
           <div class="scr">
             <div class="t">${s.time}</div>
             <div class="meta">～${s.end} ／ SCR ${s.screen}</div>
-            <span class="badge ${s.status}">${LABEL[s.status] || '-'}${s.seat ? ' ' + s.seat : ''}</span>
+            <span class="badge ${s.status}">${LABEL[s.status] || '-'}</span>
+            ${s.seat ? `<span class="seat ${SEAT_CLASS[s.seat] || ''}">${s.seat}</span>` : ''}
           </div>
           ${!s.onSale && s.status === 'before' && s.saleStart
             ? `<div class="when">購入開始 ${s.saleStart}${s.memberSaleStart ? `（会員 ${s.memberSaleStart}）` : ''}</div>` : ''}
@@ -235,8 +361,24 @@ async function loadScreenings(film) {
 const today = new Date();
 S.date = fmtDate(today);
 $('date').value = S.date;
+
+$('chain').onchange = (e) => {
+  S.chain = e.target.value;
+  localStorage.setItem('cj.chain', S.chain);
+  if (renderTheaters()) loadFilms(); else loadFilms();
+};
+$('thfilter').oninput = () => { if (renderTheaters()) loadFilms(); };
 $('theater').onchange = (e) => {
-  S.theater = e.target.value; localStorage.setItem('cj.theater', S.theater); loadFilms();
+  if (!e.target.value) return;
+  S.theater = e.target.value;
+  localStorage.setItem('cj.theater', S.theater);
+  const t = S.theaters.find((x) => x.slug === S.theater);
+  if (t && S.chain !== 'all' && t.chain !== S.chain) {
+    S.chain = t.chain;
+    localStorage.setItem('cj.chain', S.chain);
+    renderChains();
+  }
+  loadFilms();
 };
 $('date').onchange = (e) => { S.date = e.target.value; loadFilms(); };
 $('filter').oninput = () => { if (!S.film) renderFilms(); };
