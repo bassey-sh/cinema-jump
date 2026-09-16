@@ -109,6 +109,8 @@ queue-it.net               302 → /all/cc.php?...&queueittoken=...
 
 - CloudFront のキャッシュを避けるため、公式と同じく `?v=現在時刻` を付けて取る
 - まだ公開されていない日付は **404**
+- 索引の順番どおりに作品を並べると「メンバーズカード受付（入会/更新）」のような**入会受付枠が先頭に来る**。
+  実在する予約枠なので消さず、その日の最初の上映時刻が早い順に並べ替えて後ろに回している（受付枠は23:10 など深夜帯）
 
 劇場No（公式CMSの `smart_theater_no`）：
 
@@ -233,6 +235,8 @@ https://reserve.smart-theater.com/projects/startheaters-production/purchase/tran
   `https://api2.tohotheater.jp/api/schedule/v2/schedule/{劇場コード}/TNPI3050J05?vg_cd={劇場コード}&show_day={YYYYMMDD}`
   - `data[0].list[0].list[]`（作品）→ `.list[]`（上映回）。`screen.iconNm2` に「IMAXレーザー」等が入る
   - 空席は `unsoldSeatInfo.unsoldSeatStatus`：A=余裕 B=販売中 C=残少 D=売切 G=販売期間外
+  - **`G` は「まだ売っていない」と「もう売り終わった」の両方に使われる。** 上映開始時刻と現在時刻を比べて
+    `before` / `closed` に振り分けないと、上映済みの回まで「販売前」と表示されてしまう（2026-09-16 修正）
 - **購入はPOSTでしか入れない。** 公式サイトも隠しフォームを作って submit している（`scheduleUtils.js` の `purchaseTicket`）
   ```
   POST https://hlo.tohotheater.jp/net/ticket/{site_cd}/TNPI2040J03.do
