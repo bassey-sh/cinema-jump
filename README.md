@@ -205,7 +205,11 @@ https://reserve.smart-theater.com/projects/startheaters-production/purchase/tran
 - スケジュール：`https://109cinemas.net/{スラッグ}/schedules/{YYYYMMDD}.html?theater_code={劇場コード}`（UTF-8・認証不要）
 - 購入：`https://cinema.109cinemas.net/cgi-bin/pc/resv/resv_shw_ppt.cgi?ttc=&tsc=&tssc=&ymd=&cs=&stt=`
   - 2026-09-16 実測：302も挟まず、ログインも待機列もなしで「座席選択」ページ（EUC-JP）が返る
-- 劇場コードは数字とは限らない（川崎=`I1`、二子玉川=`T1`）
+- 劇場コードは数字とは限らない（川崎=`I1`、二子玉川=`T1`、プレミアム新宿=`X1`）
+- 状態は `<div class="...">` のクラスで表現される：`available`（購入＝○）／`remaining`（残りわずか＝△）／`soldout`（売り切れ＝×）／`close`（販売終了）
+- **上映が終わった回は `<li class="check_date">` ではなく `<li class="">` で出てくる。** クラス名で拾うと終了済みの回を丸ごと落とすので、`data-date` を持つ行で拾う
+- **プレミアム新宿は1つの回に座席種別が複数ある**（`a_seet`=A席 / `s_seet`=S席。購入URLのスクリーンコードも `Y5`/`Y4` と別）。
+  空席記号は種別をまたいで集約し（どれか空いていれば○）、種別ごとの状況は `seatClasses` に入れている
 - 販売開始（公式のお知らせ）：一般は上映2日前0:00、シネマポイント会員は3日前21:00
 - **109シネマズプレミアム新宿（歌舞伎町タワー）も対応済み**（劇場コード `X1`）。スケジュールURLに `?theater_code=` が付かない形式だが、付けても同じ内容が返る。スクリーン表記だけ「シアター1」ではなく「THEATER 7」なのでパーサーで吸収している
 - 高崎は劇場ページ・スケジュールとも500を返すため未対応（サイト側の不具合と思われる）
