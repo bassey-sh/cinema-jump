@@ -236,6 +236,15 @@ async function loadTheaters() {
   renderTheaters();
 }
 
+// 選択中の劇場の系列に、左のプルダウンの表示を合わせる
+function syncChain() {
+  const t = S.theaters.find((x) => x.slug === S.theater);
+  if (!t || S.chain === 'all' || t.chain === S.chain) return;
+  S.chain = t.chain;
+  localStorage.setItem('cj.chain', S.chain);
+  renderChains();
+}
+
 function chainList() {
   const seen = new Map();
   for (const t of S.theaters) if (!seen.has(t.chain)) seen.set(t.chain, t.chainLabel || t.chain);
@@ -277,7 +286,8 @@ function renderTheaters() {
     S.theater = list[0].slug;
     $('theater').value = S.theater;
     localStorage.setItem('cj.theater', S.theater);
-    return true; // 劇場が変わった
+    syncChain();       // 系列の表示が劇場とずれないように合わせる
+    return true;       // 劇場が変わった
   }
   $('theater').value = S.theater;
   return false;
@@ -372,12 +382,7 @@ $('theater').onchange = (e) => {
   if (!e.target.value) return;
   S.theater = e.target.value;
   localStorage.setItem('cj.theater', S.theater);
-  const t = S.theaters.find((x) => x.slug === S.theater);
-  if (t && S.chain !== 'all' && t.chain !== S.chain) {
-    S.chain = t.chain;
-    localStorage.setItem('cj.chain', S.chain);
-    renderChains();
-  }
+  syncChain();
   loadFilms();
 };
 $('date').onchange = (e) => { S.date = e.target.value; loadFilms(); };
