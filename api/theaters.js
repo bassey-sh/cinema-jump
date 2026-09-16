@@ -1,16 +1,14 @@
 // 劇場一覧（スラッグ＋日本語名＋チェーン）
 // ユナイテッド・シネマはトップページの劇場リンク（<img alt="劇場名">）から抽出する。
-// スターシアターズは6館固定なので lib/startheaters.js の定義をそのまま使う。
+// それ以外のチェーンは lib/chains.js の登録表から集める（劇場マスタを持つチェーンは実データを取りに行く）。
 // 劇場が増減することは稀なので CDN に1日キャッシュさせる。
 
-import { STAR_THEATERS } from '../lib/startheaters.js';
+import { chainTheaters, CHAIN_LABEL } from '../lib/chains.js';
 
 const UA = 'Mozilla/5.0 (compatible; cinema-jump/1.0)';
 
 export default async function handler(req, res) {
-  const star = STAR_THEATERS.map(({ slug, name }) => ({ slug, name, chain: 'star', comingSoon: false }));
-
-  // ユナイテッド側の取得に失敗してもスターシアターズは返す
+  // ユナイテッド側の取得に失敗しても、他チェーンは返す
   const united = [];
   let error = null;
   try {
@@ -34,7 +32,9 @@ export default async function handler(req, res) {
     error = `ユナイテッド・シネマの劇場一覧の取得に失敗: ${e.message}`;
   }
 
-  const theaters = [...united, ...star];
+  const theaters = [...united, ...await chainTheaters()]
+    .map((t) => ({ ...t, chainLabel: CHAIN_LABEL[t.chain] || t.chain }));
+
   if (!error) res.setHeader('Cache-Control', 's-maxage=86400, stale-while-revalidate=604800');
   res.json({ count: theaters.length, theaters, ...(error && { error }) });
 }

@@ -3,7 +3,8 @@
 // 対応チェーン
 //   ユナイテッド・シネマ : 販売開始と同時に生成される mc（購入システム側の作品ID）を
 //                         上映スケジュールHTMLから抜き出して、座席選択ページへ 302 で飛ばす。
-//   スターシアターズ     : 上映回ごとの eventId をスケジュールJSONから引いて飛ばす（lib/startheaters.js）
+//   SMART THEATER 系     : 上映回ごとの eventId をスケジュールJSONから引いて飛ばす（lib/chains.js に登録）
+//                         スターシアターズ（st-）／シネマサンシャイン（cs-）／イオンシネマ（ae-）
 //
 //   /api/go?th=urasoe&d=2026-07-31                        → その日の作品一覧
 //   /api/go?th=urasoe&d=2026-07-31&q=スパイダー IMAX 字幕  → 上映回一覧＋ブックマーク用URL
@@ -12,7 +13,7 @@
 //
 // &json=1 を付けると常に JSON で返る。
 
-import { isStarTheater, loadStar } from '../lib/startheaters.js';
+import { resolveChain } from '../lib/chains.js';
 
 const UA = 'Mozilla/5.0 (compatible; cinema-jump/1.0)';
 
@@ -22,7 +23,7 @@ export default async function handler(req, res) {
   // --- 入力検証（パスに使うので緩く通さない） ---
   if (!/^[a-z0-9-]+$/.test(th)) return fail(res, 400, '劇場スラッグが不正');
   if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return fail(res, 400, 'd は YYYY-MM-DD で指定しろ');
-  if (f && !/^\d+$/.test(f)) return fail(res, 400, 'f は数字');
+  if (f && !/^[A-Za-z0-9_-]+$/.test(f)) return fail(res, 400, 'f の形式が不正');
   if (t && !/^\d{1,2}:\d{2}$/.test(t)) return fail(res, 400, 't は HH:MM で指定しろ');
 
   const origin = `https://${req.headers.host}`;
@@ -32,7 +33,8 @@ export default async function handler(req, res) {
   // src = { films, screeningsOf(film), jumpUrl(screening) }
   let src;
   try {
-    src = isStarTheater(th) ? await loadStar(th, d) : await loadUnited(th, d);
+    const chain = resolveChain(th);
+    src = chain ? await chain.load(th, d) : await loadUnited(th, d);
   } catch (e) {
     return fail(res, e.status || 502, e.status ? e.message : `スケジュール取得に失敗: ${e.message}`);
   }

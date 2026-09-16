@@ -54,7 +54,7 @@
 </style>
 
 <h1>cinema-jump</h1>
-<div class="sub">ユナイテッド・シネマ／スターシアターズの座席選択ページへ直行する</div>
+<div class="sub">映画館の座席選択ページへ直行する</div>
 
 <div id="picker">
   <div class="row">
@@ -73,7 +73,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const S = { theater: localStorage.getItem('cj.theater') || 'urasoe', date: null, films: [], film: null };
+const S = { theaters: [], theater: localStorage.getItem('cj.theater') || 'urasoe', date: null, films: [], film: null };
 
 // toISOString() は UTC なので、日本時間0:00〜9:00に前日が出てしまう。端末のローカル日付で組む
 const fmtDate = (d) =>
@@ -81,11 +81,14 @@ const fmtDate = (d) =>
 const WD = ['日','月','火','水','木','金','土'];
 const LABEL = { onsale: '販売中', presale: '会員先行', before: '販売前', closed: '対象外' };
 
-const isStar = () => S.theater.startsWith('st-');
+const chainOf = () => (S.theaters.find((t) => t.slug === S.theater) || {}).chain
+  || (S.theater.startsWith('st-') ? 'star' : S.theater.startsWith('cs-') ? 'sunshine'
+    : S.theater.startsWith('ae-') ? 'aeon' : 'united');
 
-// 販売開始の目安
+// 販売開始の目安。実際の日時は各上映回のデータから出すので、ここは「見当をつける」用
 //   ユナイテッド・シネマ：会員（CLUB-SPICE）が上映日の3日前 21:00 ※実測からの推定
-//   スターシアターズ    ：上映日の2日前 0:00 ※公式のオンライン利用規約に明記（一部作品は例外あり）
+//   スターシアターズ／シネマサンシャイン：上映日の2日前 0:00 ※公式の規約・FAQに明記
+//   イオンシネマ：公式ルール未確認。各回のデータに任せる
 function saleStart(dateStr, daysBefore, time) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() - daysBefore);
@@ -93,13 +96,23 @@ function saleStart(dateStr, daysBefore, time) {
 }
 
 function saleBanner() {
-  return isStar()
-    ? `<div class="sale">
-        オンライン購入開始: <b>${saleStart(S.date, 2, '0:00')}</b>
-        <div class="note">※ 公式規約「鑑賞日2日前0:00から」。一部作品は例外あり。各回の実際の開始日時は上映回一覧に出る</div></div>`
-    : `<div class="sale">
-        会員販売開始（推定）: <b>${saleStart(S.date, 3, '21:00')}</b>
-        <div class="note">※ 上映日3日前の21:00。実測からの推定で公式確認は未取得</div></div>`;
+  const chain = chainOf();
+  if (chain === 'united') {
+    return `<div class="sale">
+      会員販売開始（推定）: <b>${saleStart(S.date, 3, '21:00')}</b>
+      <div class="note">※ 上映日3日前の21:00。実測からの推定で公式確認は未取得</div></div>`;
+  }
+  if (chain === 'star' || chain === 'sunshine') {
+    const member = chain === 'sunshine'
+      ? '会員先行は3日前20:30（PLATINUM）／21:00（BRONZE・GOLD）'
+      : '通常作品に会員先行はない';
+    return `<div class="sale">
+      オンライン購入開始: <b>${saleStart(S.date, 2, '0:00')}</b>
+      <div class="note">※ 公式規約「鑑賞日2日前0:00から」。${member}。一部作品は例外あり。各回の実際の開始日時は上映回一覧に出る</div></div>`;
+  }
+  return `<div class="sale">
+      購入開始: <b>各上映回の表示を見ろ</b>
+      <div class="note">※ このチェーンは公式の販売開始ルールが未確認。上映回ごとの実データから出す</div></div>`;
 }
 
 async function api(params) {
@@ -113,13 +126,15 @@ async function api(params) {
 async function loadTheaters() {
   try {
     const { theaters } = await (await fetch('/api/theaters')).json();
+    S.theaters = theaters;
     const opt = (t) => `<option value="${t.slug}"${t.slug === S.theater ? ' selected' : ''}>${t.name}</option>`;
-    const group = (label, chain) => {
-      const list = theaters.filter((t) => t.chain === chain && !t.comingSoon);
+    const labels = [...new Set(theaters.map((t) => t.chainLabel || t.chain))];
+    $('theater').innerHTML = labels.map((label) => {
+      const list = theaters.filter((t) => (t.chainLabel || t.chain) === label && !t.comingSoon);
       return list.length ? `<optgroup label="${label}">${list.map(opt).join('')}</optgroup>` : '';
-    };
-    $('theater').innerHTML = group('ユナイテッド・シネマ', 'united') + group('スターシアターズ（沖縄）', 'star');
+    }).join('');
   } catch {
+    S.theaters = [];
     $('theater').innerHTML = `<option value="urasoe">PARCO CITY 浦添</option><option value="st-cinemaq">シネマQ</option>`;
   }
   // 記憶していた劇場が一覧から消えていたら、先頭の劇場に合わせる
@@ -180,7 +195,7 @@ async function loadScreenings(film) {
             ${s.direct ? `<button class="btn copy" data-url="${s.direct}">直URLコピー</button>` : ''}
           </div>
         </div>`).join('') +
-        (isStar() ? `<div class="note">※ 直URLは購入画面そのもののURL。このツールを経由しないので、販売開始の瞬間に一番速い。
+        (chainOf() !== 'united' ? `<div class="note">※ 直URLは購入画面そのもののURL。このツールを経由しないので、販売開始の瞬間に一番速い。
             販売前に開くと「販売期間外」と出るので、0:00を過ぎたら再読み込みしろ</div>` : '')
         : '<div class="msg">上映回が取得できなかった</div>');
     $('back').onclick = renderFilms;
