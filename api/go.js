@@ -21,7 +21,7 @@ export default async function handler(req, res) {
   const { th = 'urasoe', d, q, f, t, json } = req.query;
 
   // --- 入力検証（パスに使うので緩く通さない） ---
-  if (!/^[a-z0-9-]+$/.test(th)) return fail(res, 400, '劇場スラッグが不正');
+  if (!/^[a-z0-9_-]+$/.test(th)) return fail(res, 400, '劇場スラッグが不正');
   if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return fail(res, 400, 'd は YYYY-MM-DD で指定しろ');
   if (f && !/^[A-Za-z0-9_-]+$/.test(f)) return fail(res, 400, 'f の形式が不正');
   if (t && !/^\d{1,2}:\d{2}$/.test(t)) return fail(res, 400, 't は HH:MM で指定しろ');
@@ -83,7 +83,13 @@ export default async function handler(req, res) {
   }
   // 外部サイト由来の遷移と判定されてトップへ飛ばされるのを避ける
   res.setHeader('Referrer-Policy', 'no-referrer');
-  res.redirect(302, src.jumpUrl(hit));
+  const jump = src.jumpUrl(hit);
+  // TOHOシネマズのようにPOSTでしか座席選択に入れないチェーンは、自動送信フォームを返す
+  if (jump && typeof jump === 'object' && jump.method === 'POST') {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.status(200).send(autoPostForm(jump, target.name, hit));
+  }
+  res.redirect(302, jump);
 }
 
 // ---------- ユナイテッド・シネマ ----------
@@ -161,6 +167,23 @@ async function loadUnited(th, d) {
     return `https://www.unitedcinemas.jp${path}`
       + `?tc=${hit.tc}&sd=${sd}&sc=${hit.screen}&st=${hit.st}&mc=${hit.mc}`;
   }
+}
+
+// POSTでしか購入画面に入れないチェーン用。開いた瞬間に自動送信する中継ページ
+function autoPostForm(jump, filmName, hit) {
+  const inputs = Object.entries(jump.fields)
+    .map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join('');
+  return `<!doctype html><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>座席選択へ移動中…</title>
+<style>body{font-family:system-ui,sans-serif;background:#111;color:#eee;padding:24px;line-height:1.7}
+ .go{display:inline-block;background:#2a6;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;border:0;font-size:15px;font-family:inherit;cursor:pointer}</style>
+<p>${esc(filmName)} ${esc(hit.time)} の座席選択へ移動中…</p>
+<form id="f" method="post" action="${esc(jump.action)}">${inputs}
+ <noscript><p>自動で移動しない場合はボタンを押せ。</p><button class="go" type="submit">座席選択へ進む</button></noscript>
+</form>
+<script>document.getElementById('f').submit();</script>`;
 }
 
 // ---------- helpers ----------

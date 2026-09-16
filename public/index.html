@@ -81,9 +81,9 @@ const fmtDate = (d) =>
 const WD = ['日','月','火','水','木','金','土'];
 const LABEL = { onsale: '販売中', presale: '会員先行', before: '販売前', closed: '対象外' };
 
+const PREFIX_CHAIN = { 'st-': 'star', 'cs-': 'sunshine', 'ae-': 'aeon', 'smt-': 'smt', 'c109-': 'c109', 'tj-': 'tjoy', 'toho-': 'toho' };
 const chainOf = () => (S.theaters.find((t) => t.slug === S.theater) || {}).chain
-  || (S.theater.startsWith('st-') ? 'star' : S.theater.startsWith('cs-') ? 'sunshine'
-    : S.theater.startsWith('ae-') ? 'aeon' : 'united');
+  || Object.entries(PREFIX_CHAIN).find(([p]) => S.theater.startsWith(p))?.[1] || 'united';
 
 // 販売開始の目安。実際の日時は各上映回のデータから出すので、ここは「見当をつける」用
 //   ユナイテッド・シネマ：会員（CLUB-SPICE）が上映日の3日前 21:00 ※実測からの推定
@@ -102,17 +102,34 @@ function saleBanner() {
       会員販売開始（推定）: <b>${saleStart(S.date, 3, '21:00')}</b>
       <div class="note">※ 上映日3日前の21:00。実測からの推定で公式確認は未取得</div></div>`;
   }
-  if (chain === 'star' || chain === 'sunshine') {
-    const member = chain === 'sunshine'
-      ? '会員先行は3日前20:30（PLATINUM）／21:00（BRONZE・GOLD）'
-      : '通常作品に会員先行はない';
+  // 上映日2日前0:00から一般発売、というチェーン。会員先行の有無だけが違う
+  const TWO_DAYS = {
+    star: '通常作品に会員先行はない',
+    sunshine: '会員先行は3日前20:30（PLATINUM）／21:00（BRONZE・GOLD）',
+    c109: 'シネマポイント会員は3日前21:00から',
+    toho: 'TOHO-ONE会員は3日前21:00から（ログインが要る）',
+  };
+  if (TWO_DAYS[chain]) {
+    const detail = chain === 'star' || chain === 'sunshine'
+      ? '各回の実際の開始日時は上映回一覧に出る'
+      : 'このチェーンは回ごとの販売開始日時がデータに出ないので、この目安で判断しろ';
     return `<div class="sale">
       オンライン購入開始: <b>${saleStart(S.date, 2, '0:00')}</b>
-      <div class="note">※ 公式規約「鑑賞日2日前0:00から」。${member}。一部作品は例外あり。各回の実際の開始日時は上映回一覧に出る</div></div>`;
+      <div class="note">※ 公式規約・FAQで「鑑賞日2日前0:00から」。${TWO_DAYS[chain]}。一部作品は例外あり。${detail}</div></div>`;
+  }
+  if (chain === 'aeon') {
+    return `<div class="sale">
+      オンライン購入開始: <b>各上映回の表示を見ろ</b>
+      <div class="note">※ 実測では上映日2日前0:00（会員はその前日18:00）。公式ルールは未確認なので、各回の実データを出している</div></div>`;
+  }
+  if (chain === 'tjoy') {
+    return `<div class="sale">
+      掲載＝販売開始: <b>当日＋2日先まで</b>
+      <div class="note">※ T・ジョイはスケジュールが出た時点で買える。先の日付はまだ出ない</div></div>`;
   }
   return `<div class="sale">
       購入開始: <b>各上映回の表示を見ろ</b>
-      <div class="note">※ このチェーンは公式の販売開始ルールが未確認。上映回ごとの実データから出す</div></div>`;
+      <div class="note">※ このチェーンは公式の販売開始ルールが未確認</div></div>`;
 }
 
 async function api(params) {
@@ -195,8 +212,9 @@ async function loadScreenings(film) {
             ${s.direct ? `<button class="btn copy" data-url="${s.direct}">直URLコピー</button>` : ''}
           </div>
         </div>`).join('') +
-        (chainOf() !== 'united' ? `<div class="note">※ 直URLは購入画面そのもののURL。このツールを経由しないので、販売開始の瞬間に一番速い。
+        (['star', 'sunshine', 'aeon', 'smt'].includes(chainOf()) ? `<div class="note">※ 直URLは購入画面そのもののURL。このツールを経由しないので、販売開始の瞬間に一番速い。
             販売前に開くと「販売期間外」と出るので、0:00を過ぎたら再読み込みしろ</div>` : '')
+        + (chainOf() === 'toho' ? '<div class="note">※ TOHOは購入がPOST送信のため直URLを作れない。「座席選択へ」を押すと自動送信ページを経由し、TOHO側の「ログインせずに購入する」を1回押す必要がある</div>' : '')
         : '<div class="msg">上映回が取得できなかった</div>');
     $('back').onclick = renderFilms;
     document.querySelectorAll('.copy').forEach((b) => {

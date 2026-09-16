@@ -3,12 +3,18 @@
 映画館の**座席選択ページへ直行する**リダイレクタ。
 上映スケジュールページを経由せず、スマホからワンタップで購入画面へ飛ぶ。
 
-| チェーン | スラッグ | 劇場 | 状態 |
+| チェーン | スラッグ | 劇場 | 事前にURLを押さえられるか |
 |---|---|---|---|
-| ユナイテッド・シネマ | （接頭辞なし） | 全国40館 | 2026-07-28 のスパイダーマン初日販売で実戦投入し、全機能の動作を確認済み |
-| スターシアターズ（沖縄） | `st-` | シネマQ ほか6館 | 2026-09-15 対応。実データでテスト済み |
-| シネマサンシャイン | `cs-` | グランドシネマサンシャイン池袋 ほか16館 | 2026-09-16 対応。実データでテスト済み・実戦未投入 |
-| イオンシネマ | `ae-` | 全国99館 | 2026-09-16 対応。実データでテスト済み・実戦未投入 |
+| ユナイテッド・シネマ | （接頭辞なし） | 40館 | ✕（販売開始後に mc を抜く。2026-07-28 実戦投入済み） |
+| スターシアターズ（沖縄） | `st-` | 6館 | **○** |
+| シネマサンシャイン | `cs-` | 16館 | **○** |
+| イオンシネマ | `ae-` | 99館 | **○** |
+| 松竹（MOVIX・ピカデリー・東劇） | `smt-` | 23館 | **○** |
+| 109シネマズ | `c109-` | 19館 | ✕（販売開始後に購入リンクが出る） |
+| T・ジョイ（新宿バルト9 ほか） | `tj-` | 3館 | ✕（掲載＝販売開始。当日＋2日先まで） |
+| TOHOシネマズ | `toho-` | 72館 | △（識別子は先に取れるが、購入がPOSTなので1タップ挟まる） |
+
+合計278館。実戦投入済みはユナイテッド・シネマのみで、他は実データでのテストのみ。
 
 以下「なぜ必要か」〜「購入エンドポイント」はユナイテッド・シネマの話。他チェーンは[SMART THEATER 系](#smart-theater-系スターシアターズシネマサンシャインイオンシネマ)を参照。
 
@@ -180,9 +186,62 @@ https://reserve.smart-theater.com/projects/startheaters-production/purchase/tran
 - 掲載は9〜10日先まで。特別上映はもっと先の回も出る
 - 作品IDが英数字（`fmq6ie17k`）なので、`f=` の検証は数字限定にできない
 
+### 松竹マルチプレックスシアターズ（MOVIX・ピカデリー・東劇）
+
+2026-09-16 対応。**劇場ごとに新旧2つの購入システムが混在**している（新10館・旧13館）。
+
+- スケジュールは静的HTML断片：`https://www.smt-cinema.com/html/site/sp/schedule/s0200_{劇場コード}_{YYYYMMDD}_schedule_daily_movie_area.html`
+- 新方式：`data-event-id` あり → SMART THEATER（`projectId=shochikumultiplextheatres-production`）
+- 旧方式：`id="0_{th}_{mo}_{sd}_{pe}_{sc}_{fl}"` → `https://ticket.smt-cinema.com/ticket/f0100.do?th=&mo=&sd=&pe=&sc=&fl=`
+- **丸の内ピカデリー・新宿ピカデリーは旧方式**。丸の内の Dolby Cinema 上映は作品名に【DolbyCinema】が付く
+- どちらも販売開始前から上映回IDが確定している
+
+## 販売後にしか取れないチェーン
+
+### 109シネマズ
+
+2026-09-16 対応。ユナイテッド・シネマと同じ型で、購入リンクは販売開始まで HTML に出ない。
+
+- スケジュール：`https://109cinemas.net/{スラッグ}/schedules/{YYYYMMDD}.html?theater_code={劇場コード}`（UTF-8・認証不要）
+- 購入：`https://cinema.109cinemas.net/cgi-bin/pc/resv/resv_shw_ppt.cgi?ttc=&tsc=&tssc=&ymd=&cs=&stt=`
+  - 2026-09-16 実測：302も挟まず、ログインも待機列もなしで「座席選択」ページ（EUC-JP）が返る
+- 劇場コードは数字とは限らない（川崎=`I1`、二子玉川=`T1`）
+- 販売開始（公式のお知らせ）：一般は上映2日前0:00、シネマポイント会員は3日前21:00
+- 高崎はページが500、プレミアム新宿はこの方式のスケジュールを持たないため未対応
+
+### T・ジョイ（新宿バルト9 ほか）
+
+2026-09-16 対応。**掲載＝販売開始**で、スケジュールは当日＋2日先までしか出ない。
+
+- 当日分は劇場トップに直書き。他の日付は CSRF トークン＋Cookie 付きの POST
+  `POST https://tjoy.jp/theaterTop/scheduleGetHtmlApi` に `data={"date":"YYYY-MM-DD","theaterId":"140"}`
+- トークンは劇場トップの `<meta name="csrf-token">` にある
+- 購入：`https://tjoy.jp/{スラッグ}/reservation/index/{上映回ID}/{作品コード}/{スクリーン}/{日付}?type=film`（GETで座席選択へ）
+- 劇場IDを取得済みなのは3館（バルト9=140・PRINCE品川=180・博多=550）。残り16館は未取得
+- 応答に Queue-it のコネクタが常に付いている。混雑時に待機列が出るかは**未検証**
+
+### TOHOシネマズ
+
+2026-09-16 対応。**このツールで唯一、302で飛ばせないチェーン。**
+
+- スケジュールは認証不要の公開JSON API：
+  `https://api2.tohotheater.jp/api/schedule/v2/schedule/{劇場コード}/TNPI3050J05?vg_cd={劇場コード}&show_day={YYYYMMDD}`
+  - `data[0].list[0].list[]`（作品）→ `.list[]`（上映回）。`screen.iconNm2` に「IMAXレーザー」等が入る
+  - 空席は `unsoldSeatInfo.unsoldSeatStatus`：A=余裕 B=販売中 C=残少 D=売切 G=販売期間外
+- **購入はPOSTでしか入れない。** 公式サイトも隠しフォームを作って submit している（`scheduleUtils.js` の `purchaseTicket`）
+  ```
+  POST https://hlo.tohotheater.jp/net/ticket/{site_cd}/TNPI2040J03.do
+    site_cd, jyoei_date, gekijyo_cd, screen_cd, sakuhin_cd, pf_no, fnc=1, pageid=2000J01, enter_kbn
+  ```
+  そのため `jumpUrl()` はURL文字列ではなくPOSTの指示を返し、`api/go.js` が**自動送信フォームのページ**を返す
+- 2026-09-16 実測：送信すると「TOHO-ONE会員入会促進」画面に着き、**「ログインせずに購入する」を1回押す**と座席選択へ進む（公式サイト経由でも同じ画面を通る）
+- 販売開始（公式FAQ）：一般は上映2日前0:00、TOHO-ONE会員は3日前21:00
+
 ## チェーンを追加するには
 
 1. `lib/{チェーン名}.js` に `load(th, d)` を書く。返すのは `{ films, screeningsOf(film), jumpUrl(screening) }`
+   - `jumpUrl()` はURL文字列を返せばよい。POSTでしか入れないチェーンは
+     `{ method: 'POST', action, fields }` を返すと自動送信フォームが使われる（TOHOの例）
 2. `lib/chains.js` の `CHAINS` に `{ id, prefix, label, theaters, load }` を1件足す
 3. `api/go.js` と `public/index.html` は触らなくていい（接頭辞で自動的に振り分ける）
 
@@ -196,7 +255,7 @@ SMART THEATER 系なら `lib/smarttheater.js` の `toScreening()` を使えば�
 https://<your-app>.vercel.app/
 ```
 
-劇場（4チェーン161館からチェーン別に選択・記憶される）→ 日付 → 作品 → 上映回、とタップで辿れる。
+劇場（8チェーン278館からチェーン別に選択・記憶される）→ 日付 → 作品 → 上映回、とタップで辿れる。
 各回に販売状態・空席状況・購入開始日時・「座席選択へ」「URLをコピー」「直URLコピー」が並ぶ。
 
 ### URLを直接叩く
@@ -213,7 +272,7 @@ https://<your-app>.vercel.app/
 
 | キー | 必須 | 例 | 説明 |
 |---|---|---|---|
-| `th` | | `urasoe` / `st-cinemaq` / `cs-gdcs` / `ae-chofu` | 劇場スラッグ（省略時 `urasoe`）。接頭辞でチェーンを判別（`st-`/`cs-`/`ae-`、なし＝ユナイテッド） |
+| `th` | | `urasoe` / `st-cinemaq` / `toho-081` | 劇場スラッグ（省略時 `urasoe`）。接頭辞でチェーンを判別（`st-`/`cs-`/`ae-`/`smt-`/`c109-`/`tj-`/`toho-`、なし＝ユナイテッド） |
 | `d` | ✅ | `2026-07-31` | 上映日 |
 | `q` | | `スパイダーマン IMAX 字幕` | 作品名検索（空白区切りAND） |
 | `f` | | `22072` / `fmq6ie17k` | 作品ID（`q` より優先）。チェーンにより数字とは限らない |
@@ -293,7 +352,11 @@ cinema-jump/
 │   ├── chains.js        対応チェーンの登録表（接頭辞・劇場一覧・購入URL）
 │   ├── smarttheater.js  SMART THEATER 系の共通処理（状態判定・空席・日時）
 │   ├── scheduledata.js  スターシアターズ／シネマサンシャインの共通ローダー
-│   └── aeoncinema.js    イオンシネマの解析
+│   ├── aeoncinema.js    イオンシネマ
+│   ├── shochiku.js      松竹（MOVIX・ピカデリー・東劇。新旧2方式）
+│   ├── cinemas109.js    109シネマズ
+│   ├── tjoy.js          T・ジョイ（新宿バルト9 ほか）
+│   └── toho.js          TOHOシネマズ（購入はPOST）
 ├── public/
 │   └── index.html    操作UI
 ├── test.mjs          ローカル検証

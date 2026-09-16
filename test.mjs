@@ -18,6 +18,7 @@ const call = async (query) => {
 };
 
 const line = (s) => console.log('\n=== ' + s + ' ===');
+const jstDate = (plus) => new Date(Date.now() + 9 * 3600e3 + plus * 86400e3).toISOString().slice(0, 10);
 
 // 0) 環境確認：Shift_JIS デコードが通るか
 line('環境: Node ' + process.version);
@@ -29,43 +30,58 @@ try {
 }
 
 // 1) 作品一覧（7/31・販売前の日）
-line('① 作品一覧 7/31');
+line('① 作品一覧 ユナイテッド浦添 ' + jstDate(1));
 {
-  const r = await call({ th: 'urasoe', d: '2026-07-31', json: '1' });
+  const r = await call({ th: 'urasoe', d: jstDate(1), json: '1' });
   console.log('status:', r._status, '/ 作品数:', r._body?.films?.length);
-  console.log(r._body?.films?.filter(f => f.name.includes('スパイダーマン')));
+  console.log(r._body?.films?.slice(0, 5));
 }
 
 // 2) 作品名検索 → 上映回一覧（販売前なので onSale:false のはず）
-line('② スパイダーマン IMAX 字幕 の上映回 7/31');
+line('② 作品名検索（IMAX 字幕）の上映回 ' + jstDate(1));
 {
-  const r = await call({ th: 'urasoe', d: '2026-07-31', q: 'スパイダーマン IMAX 字幕', json: '1' });
+  const r = await call({ th: 'urasoe', d: jstDate(1), q: 'IMAX 字幕', json: '1' });
   console.log('status:', r._status, '/ film:', r._body?.film, r._body?.name);
   console.table(r._body?.screenings?.map(({ time, end, screen, status, seat, mc }) => ({ time, end, screen, status, seat, mc })));
   console.log('bookmark例:', r._body?.screenings?.[0]?.bookmark);
 }
 
 // 2.5) 3状態の区別（今日の回：終了済み=closed / 販売中=onsale が混在するはず）
-line('②.5 状態判定 ちいかわIMAX 今日');
+line('②.5 状態判定 今日のIMAX回');
 {
-  const today = new Date().toISOString().slice(0, 10);
-  const r = await call({ th: 'urasoe', d: today, q: 'ちいかわ IMAX', json: '1' });
+  const r = await call({ th: 'urasoe', d: jstDate(0), q: 'IMAX 字幕', json: '1' });
   console.table(r._body?.screenings?.map(({ time, status, seat, mc }) => ({ time, status, seat, mc })));
 }
 
 // 3) 販売中の回 → 302 リダイレクトになるか（ちいかわIMAX 7/30 11:05）
-line('③ 販売中の回にジャンプ ちいかわIMAX 7/30 11:05');
+line('③ 販売中の回にジャンプ（ユナイテッド浦添）');
 {
-  const r = await call({ th: 'urasoe', d: '2026-07-30', q: 'ちいかわ IMAX', t: '11:05' });
-  console.log('status:', r._status);
-  console.log('redirect:', r._redirect || r._body);
+  const list = await call({ th: 'urasoe', d: jstDate(1), json: '1' });
+  const film = list._body?.films?.[0]?.film;
+  const s = await call({ th: 'urasoe', d: jstDate(1), f: film, json: '1' });
+  const hit = s._body?.screenings?.find((x) => x.onSale);
+  if (hit) {
+    const r = await call({ th: 'urasoe', d: jstDate(1), f: film, t: hit.time });
+    console.log('status:', r._status);
+    console.log('redirect:', r._redirect || r._body);
+  } else console.log('販売中の回がない');
 }
 
 // 4) 販売前の回を指定 → 503 で一覧が返るか
-line('④ 販売前の回を指定 スパイダーマン 7/31 10:50');
+line('④ 販売前の回を指定（ユナイテッド浦添 ' + jstDate(5) + '）');
 {
-  const r = await call({ th: 'urasoe', d: '2026-07-31', f: '22072', t: '10:50' });
-  console.log('status:', r._status, '/', r._body?.error);
+  const list = await call({ th: 'urasoe', d: jstDate(5), json: '1' });
+  const film = list._body?.films?.[0]?.film;
+  if (!film) console.log('status:', list._status, '/', list._body?.error);
+  else {
+    const s = await call({ th: 'urasoe', d: jstDate(5), f: film, json: '1' });
+    const before = s._body?.screenings?.find((x) => x.status === 'before');
+    if (!before) console.log('販売前の回なし:', s._body?.screenings?.map((x) => x.status).join(','));
+    else {
+      const r = await call({ th: 'urasoe', d: jstDate(5), f: film, t: before.time });
+      console.log('status:', r._status, '/', r._body?.error);
+    }
+  }
 }
 
 // 4.5) 劇場一覧APIが劇場名まで取れるか
@@ -82,7 +98,8 @@ line('④.5 劇場一覧API');
 // 5) HTML 出力（スマホ表示用）が生成されるか
 line('⑤ HTML出力');
 {
-  const r = await call({ th: 'urasoe', d: '2026-07-31', f: '22072' });
+  const list = await call({ th: 'urasoe', d: jstDate(1), json: '1' });
+  const r = await call({ th: 'urasoe', d: jstDate(1), f: list._body?.films?.[0]?.film });
   console.log('status:', r._status, '/ Content-Type:', r._headers['Content-Type']);
   console.log('length:', String(r._body).length, '/ 販売前表示:', String(r._body).includes('販売前'));
 }
@@ -90,12 +107,15 @@ line('⑤ HTML出力');
 // ---------- SMART THEATER 系チェーン（スターシアターズ／シネマサンシャイン／イオンシネマ） ----------
 // 購入開始は各チェーンの規約次第（スター・サンシャインは上映日2日前0:00）。
 // 翌日＝販売中、4日後＝販売前 になるのが期待値。
-const jstDate = (plus) => new Date(Date.now() + 9 * 3600e3 + plus * 86400e3).toISOString().slice(0, 10);
-
 const chainSamples = [
   ['st-cinemaq', 'シネマQ'],
   ['cs-gdcs', 'グランドシネマサンシャイン池袋'],
   ['ae-', 'イオンシネマ（劇場一覧の先頭で置き換える）'],
+  ['smt-marunouchi', '丸の内ピカデリー（旧方式）'],
+  ['smt-miyoshi', 'MOVIX三好（新方式）'],
+  ['c109-kiba', '109シネマズ木場'],
+  ['tj-shinjuku_wald9', '新宿バルト9'],
+  ['toho-081', 'TOHOシネマズ日比谷（購入はPOST）'],
 ];
 
 // 6) 劇場一覧：チェーンごとの件数
@@ -130,7 +150,9 @@ for (const [th, label] of chainSamples) {
   if (hit) {
     const j = await call({ th, d, f: film.film, t: hit.time });
     console.log(' ジャンプ:', j._status, '/ Referrer-Policy:', j._headers['Referrer-Policy']);
-    console.log(' redirect:', j._redirect || j._body);
+    // TOHOはPOSTの自動送信フォーム（HTML）が返る
+    console.log(' redirect:', j._redirect
+      || `自動送信フォーム action=${(String(j._body).match(/action="([^"]+)"/) || [])[1]}`);
   } else {
     console.log(' 販売中の回がない（上映終了後の時間帯なら正常）');
   }
