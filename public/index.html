@@ -3,6 +3,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="referrer" content="no-referrer">
+<!-- 外部スクリプトの読み込みと外部への通信を禁止（万一の混入時の被害を抑える） -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'none'; base-uri 'none'">
 <title>cinema-jump</title>
 <style>
   /* 速度優先の道具なので、外部フォント・画像・ライブラリは一切使わない。
@@ -146,6 +149,10 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+// 映画館サイト由来の文字列（作品名・劇場名・スクリーン名）をそのままHTMLに差し込まない。
+// 向こうのデータに <script> が混ざったらこちらのページで動いてしまうため
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const S = {
   theaters: [],
   theater: localStorage.getItem('cj.theater') || 'urasoe',
@@ -270,16 +277,16 @@ function renderTheaters() {
     $('theater').innerHTML = '<option value="">該当する劇場なし</option>';
     return;
   }
-  const opt = (t, withChain) =>
-    `<option value="${t.slug}"${t.slug === S.theater ? ' selected' : ''}>${withChain ? `${t.name}` : t.name}</option>`;
+  const opt = (t) =>
+    `<option value="${esc(t.slug)}"${t.slug === S.theater ? ' selected' : ''}>${esc(t.name)}</option>`;
   // 系列をまたぐときだけ、どの系列かが分かるようにまとめる
   const grouped = kw || S.chain === 'all';
   $('theater').innerHTML = grouped
     ? chainList().map(([id, label]) => {
       const inChain = list.filter((t) => t.chain === id);
-      return inChain.length ? `<optgroup label="${label}">${inChain.map((t) => opt(t, true)).join('')}</optgroup>` : '';
+      return inChain.length ? `<optgroup label="${esc(label)}">${inChain.map(opt).join('')}</optgroup>` : '';
     }).join('')
-    : list.map((t) => opt(t, false)).join('');
+    : list.map(opt).join('');
 
   // 選択中の劇場が候補から消えていたら先頭に切り替える
   if (!list.some((t) => t.slug === S.theater)) {
@@ -303,7 +310,7 @@ async function loadFilms() {
     renderFilms();
   } catch (e) {
     S.films = [];
-    $('list').innerHTML = `<div class="msg err">${e.message}</div>`;
+    $('list').innerHTML = `<div class="msg err">${esc(e.message)}</div>`;
   }
 }
 
@@ -314,7 +321,7 @@ function renderFilms() {
   if (!list.length) return ($('list').innerHTML = '<div class="msg">該当作品なし</div>');
   $('list').innerHTML =
     `<div class="head">上映作品<span class="count">${list.length}件</span></div>` +
-    list.map((f) => `<div class="item" data-film="${f.film}">${f.name}</div>`).join('');
+    list.map((f) => `<div class="item" data-film="${esc(f.film)}">${esc(f.name)}</div>`).join('');
   document.querySelectorAll('[data-film]').forEach((el) =>
     el.onclick = () => loadScreenings(el.dataset.film));
 }
@@ -327,25 +334,25 @@ async function loadScreenings(film) {
     S.film = j;
     $('list').innerHTML =
       `<div class="back" id="back">← 作品一覧へ戻る</div>
-       <div class="head">${j.name}<span class="count">${S.date}</span></div>` +
+       <div class="head">${esc(j.name)}<span class="count">${esc(S.date)}</span></div>` +
       (j.screenings.length ? j.screenings.map((s) => `
         <div class="item" style="cursor:default">
           <div class="scr">
-            <div class="t">${s.time}</div>
-            <div class="meta">～${s.end} ／ SCR ${s.screen}</div>
+            <div class="t">${esc(s.time)}</div>
+            <div class="meta">～${esc(s.end)} ／ SCR ${esc(s.screen)}</div>
             <span class="badge ${s.status}">${LABEL[s.status] || '-'}</span>
-            ${s.seat ? `<span class="seat ${SEAT_CLASS[s.seat] || ''}">${s.seat}</span>` : ''}
+            ${s.seat ? `<span class="seat ${SEAT_CLASS[s.seat] || ''}">${esc(s.seat)}</span>` : ''}
           </div>
           ${!s.onSale && s.status === 'before' && s.saleStart
-            ? `<div class="when">購入開始 ${s.saleStart}${s.memberSaleStart ? `（会員 ${s.memberSaleStart}）` : ''}</div>` : ''}
-          ${s.platinumFrom ? `<div class="when">PLATINUM会員先行 ${s.platinumFrom}〜${s.platinumLimit ? `（${s.platinumLimit}枚まで）` : ''}</div>` : ''}
+            ? `<div class="when">購入開始 ${esc(s.saleStart)}${s.memberSaleStart ? `（会員 ${esc(s.memberSaleStart)}）` : ''}</div>` : ''}
+          ${s.platinumFrom ? `<div class="when">PLATINUM会員先行 ${esc(s.platinumFrom)}〜${s.platinumLimit ? `（${esc(s.platinumLimit)}枚まで）` : ''}</div>` : ''}
           ${s.windowOnly ? '<div class="when">窓口販売のみ</div>' : ''}
           <div class="btns">
             ${s.onSale
-              ? `<a class="btn go" href="${s.bookmark}">${s.status === 'presale' ? '会員先行購入へ' : '座席選択へ'}</a>`
+              ? `<a class="btn go" href="${esc(s.bookmark)}">${s.status === 'presale' ? '会員先行購入へ' : '座席選択へ'}</a>`
               : `<button class="btn" disabled>${s.status === 'before' ? '販売開始前' : '販売対象外'}</button>`}
-            <button class="btn copy" data-url="${s.bookmark}">URLをコピー</button>
-            ${s.direct ? `<button class="btn copy" data-url="${s.direct}">直URLコピー</button>` : ''}
+            <button class="btn copy" data-url="${esc(s.bookmark)}">URLをコピー</button>
+            ${s.direct ? `<button class="btn copy" data-url="${esc(s.direct)}">直URLコピー</button>` : ''}
           </div>
         </div>`).join('') +
         (['star', 'sunshine', 'aeon', 'smt'].includes(chainOf()) ? `<div class="note">※ 直URLは購入画面そのもののURL。このツールを経由しないので、販売開始の瞬間に一番速い。
@@ -362,7 +369,7 @@ async function loadScreenings(film) {
       };
     });
   } catch (e) {
-    $('list').innerHTML = `<div class="back" id="back">← 戻る</div><div class="msg err">${e.message}</div>`;
+    $('list').innerHTML = `<div class="back" id="back">← 戻る</div><div class="msg err">${esc(e.message)}</div>`;
     $('back').onclick = renderFilms;
   }
 }
