@@ -199,11 +199,15 @@ function setTarget(ms, src) {
   $('src').textContent = src;
   $('at').value = toLocalInput(ms);
 }
-// 劇場データに出ないチェーン（ユナイテッド等）は「上映日2日前の0:00」を仮置きする。
-// ユナイテッド浦添の実戦（2026-10 ディスクロージャー IMAX）で一般販売が日付変更と同時だったことに合わせた
+// 劇場データに出ないチェーンは目安を仮置きする。
+//   ユナイテッド（接頭辞なし）：CLUB-SPICE会員先行＝上映日3日前の21:00（浦添の実戦で確認。一般は2日前0:00）
+//   それ以外（109・TOHO・松竹・T・ジョイ）：一般＝上映日2日前の0:00
 function guessTarget() {
-  const ms = +new Date(`${d}T00:00:00+09:00`) - 2 * 86400e3;
-  setTarget(ms, '推定：上映日2日前 0:00');
+  const united = !/^(st|cs|ae|smt|c109|tj|toho)-/.test(th);
+  const ms = united
+    ? +new Date(`${d}T21:00:00+09:00`) - 3 * 86400e3
+    : +new Date(`${d}T00:00:00+09:00`) - 2 * 86400e3;
+  setTarget(ms, united ? '推定：上映日3日前 21:00（会員先行）' : '推定：上映日2日前 0:00');
 }
 if (P.get('at')) setTarget(fromLocalInput(P.get('at')), '手動');
 $('apply').onclick = () => { setTarget(fromLocalInput($('at').value), '手動'); note(`開始時刻を手動で ${fmtJst(target)} に`); };
