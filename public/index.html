@@ -349,14 +349,19 @@ async function loadScreenings(film) {
           ${s.windowOnly ? '<div class="when">窓口販売のみ</div>' : ''}
           <div class="btns">
             ${s.onSale
-              ? `<a class="btn go" href="${esc(s.bookmark)}">${s.status === 'presale' ? '会員先行購入へ' : '座席選択へ'}</a>`
-              : `<button class="btn" disabled>${s.status === 'before' ? '販売開始前' : '販売対象外'}</button>`}
+              // 販売中は購入URLが確定しているので、このツールを経由せず直に開く（TOHOだけは自動送信ページ経由）
+              ? `<a class="btn go" href="${esc(s.direct || s.bookmark)}">${s.status === 'presale' ? '会員先行購入へ' : '座席選択へ'}</a>`
+              : s.status === 'before'
+                ? `<a class="btn go" href="${esc(s.wait)}">待機して自動で飛ぶ</a>`
+                : '<button class="btn" disabled>販売対象外</button>'}
             <button class="btn copy" data-url="${esc(s.bookmark)}">URLをコピー</button>
             ${s.direct ? `<button class="btn copy" data-url="${esc(s.direct)}">直URLコピー</button>` : ''}
           </div>
         </div>`).join('') +
-        (['star', 'sunshine', 'aeon', 'smt'].includes(chainOf()) ? `<div class="note">※ 直URLは購入画面そのもののURL。このツールを経由しないので、販売開始の瞬間に一番速い。
-            販売前に開くと「販売期間外」と出るので、0:00を過ぎたら再読み込みしろ</div>` : '')
+        `<div class="note">※ 「待機」は販売開始の瞬間に自動で購入画面へ飛ぶページ。開始前に開いて、画面を表に出したまま待て。<br>
+            ※ 直URLは購入画面そのもののURL。このツールを経由しないので販売中の回はこれが一番速い</div>`
+        + (['star', 'sunshine', 'aeon', 'smt'].includes(chainOf()) ? '<div class="note">※ このチェーンは販売前でも直URLが作れる。販売前に開くと「販売期間外」と出る</div>' : '')
+        + (chainOf() === 'united' ? '<div class="note">※ ユナイテッドの直URLは販売開始後にしか作れない（購入システム側のIDが開始時に生成される）。開始の瞬間は「待機」を使え</div>' : '')
         + (chainOf() === 'toho' ? '<div class="note">※ TOHOは購入がPOST送信のため直URLを作れない。「座席選択へ」を押すと自動送信ページを経由し、TOHO側の「ログインせずに購入する」を1回押す必要がある</div>' : '')
         : '<div class="msg">上映回が取得できなかった</div>');
     $('back').onclick = renderFilms;

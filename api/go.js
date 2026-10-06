@@ -11,7 +11,8 @@
 //   /api/go?th=urasoe&d=2026-07-31&f=22072&t=10:50        → 販売中なら座席選択へ直行
 //   /api/go?th=st-cinemaq&d=2026-09-17&f=15692&t=14:35    → スターシアターズ（シネマQ）も同じ形式
 //
-// &json=1 を付けると常に JSON で返る。
+// &json=1 を付けると常に JSON で返る（now＝サーバー時刻付き。public/wait.html がこれで時計を合わせ、
+// 販売開始の瞬間まで毎秒叩いて onSale が立ったら jump へ飛ぶ）。
 
 import { resolveChain } from '../lib/chains.js';
 
@@ -26,7 +27,7 @@ export default async function handler(req, res) {
   if (f && !/^[A-Za-z0-9_-]+$/.test(f)) return fail(res, 400, 'f の形式が不正');
   if (t && !/^\d{1,2}:\d{2}$/.test(t)) return fail(res, 400, 't は HH:MM で指定しろ');
 
-  const origin = `https://${req.headers.host}`;
+  const origin = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`;
   const wantJson = json === '1';
 
   // --- チェーンごとにスケジュールを読む ---
@@ -60,9 +61,17 @@ export default async function handler(req, res) {
     return ok(res, wantJson, { date: d, theater: th, films }, () => renderFilms(origin, th, d, films));
   }
 
-  const screenings = src.screeningsOf(target.film).map((s) => ({
-    ...s, bookmark: `${origin}/api/go?th=${th}&d=${d}&f=${target.film}&t=${s.time}`,
-  }));
+  const screenings = src.screeningsOf(target.film).map((s) => {
+    // jump: 販売中なら、このツールを経由せず開ける購入URL（TOHOはPOSTなので無し）。
+    // 待機ページはこれへ直接飛ぶので、販売開始の瞬間に関数の往復1回ぶんを節約できる
+    const j = s.onSale ? src.jumpUrl(s) : null;
+    return {
+      ...s,
+      bookmark: `${origin}/api/go?th=${th}&d=${d}&f=${target.film}&t=${s.time}`,
+      wait: `${origin}/wait.html?th=${th}&d=${d}&f=${target.film}&t=${s.time}`,
+      jump: typeof j === 'string' ? j : null,
+    };
+  });
 
   // --- 時刻指定なし → 上映回一覧（ブックマーク用URL付き） ---
   if (!t) {
@@ -75,7 +84,12 @@ export default async function handler(req, res) {
   if (!hit) {
     return fail(res, 404, `${t} の回が見つからない`, { screenings });
   }
-  if (!hit.onSale) {
+  // 販売開始の直前（90秒以内）で直URLがあるチェーンは、こちらの時計で弾かずに劇場側へ素通しする。
+  // Vercel の時計が数秒遅れているだけで 503 を返して足止めするのを避けるため。
+  // 販売前なら劇場側が「販売期間外」を出すので、判断はそっちに任せればいい
+  const soon = hit.status === 'before' && hit.direct && hit.saleStartAt
+    && new Date(hit.saleStartAt) - Date.now() <= 90e3;
+  if (!hit.onSale && !soon) {
     const why = hit.status === 'before'
       ? (hit.saleStart ? `まだ販売前（${hit.saleStart} から購入可）` : 'まだ販売前（mc未生成）')
       : '販売対象外（上映済み・販売締切・満席のいずれか）';
@@ -83,7 +97,7 @@ export default async function handler(req, res) {
   }
   // 外部サイト由来の遷移と判定されてトップへ飛ばされるのを避ける
   res.setHeader('Referrer-Policy', 'no-referrer');
-  const jump = src.jumpUrl(hit);
+  const jump = soon ? hit.direct : src.jumpUrl(hit);
   // TOHOシネマズのようにPOSTでしか座席選択に入れないチェーンは、自動送信フォームを返す
   if (jump && typeof jump === 'object' && jump.method === 'POST') {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -147,12 +161,17 @@ async function loadUnited(th, d) {
         const hit = sold[st];
         const status = hit ? (hit.presale ? 'presale' : 'onsale')
           : /outside_sales_period/.test(chunk) ? 'before' : 'closed';
-        screenings.push({
+        const s = {
           time, end, screen: hit?.sc || sc, st, status,
           onSale: !!hit,
           seat: (chunk.match(/alt="\[([○△×□])\]"/) || [])[1] || null, // ○空席 △残少 ×満席 □対象外
           mc: hit?.mc ?? null, tc: hit?.tc ?? null, presale: !!hit?.presale,
-        });
+          saleStart: null, saleStartAt: null, // HTMLには回ごとの販売開始日時が出ない（一般は上映2日前0:00）
+        };
+        // 販売中なら購入URL（cc.php / presale.php）は確定しているので直URLとして出す。
+        // 販売開始後にまでこのツールを経由する理由はない
+        s.direct = hit ? jumpUrl(s) : null;
+        screenings.push(s);
       }
     }
     return screenings;
@@ -198,7 +217,8 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
 function ok(res, wantJson, data, renderHtml) {
-  if (wantJson) return res.status(200).json(data);
+  // now: サーバー時刻。待機ページが端末の時計のズレを補正するのに使う
+  if (wantJson) return res.status(200).json({ ...data, now: new Date().toISOString() });
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.status(200).send(renderHtml());
 }

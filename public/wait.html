@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; form-action 'none'; base-uri 'none'">
+<title>cinema-jump 待機</title>
+<style>
+  /* index.html と同じ配色。販売開始の瞬間に描画で待たされないよう、装飾は最小限 */
+  :root {
+    color-scheme: dark;
+    --bg: #0d0f12; --surface: #16191e; --surface2: #1b1f26; --line: #262b33;
+    --text: #e8eaed; --muted: #8a919c; --accent: #e8b44a;
+    --go: #1fae6a; --warn: #e8913a; --info: #5aa9e6; --bad: #e05a5a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0 14px 28px;
+    background: var(--bg); color: var(--text); line-height: 1.6; max-width: 720px; margin-inline: auto;
+  }
+  header { padding: 16px 0 10px; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: .08em; display: flex; align-items: center; gap: 9px; }
+  h1::before {
+    content: ''; width: 5px; height: 19px; border-radius: 2px;
+    background: repeating-linear-gradient(180deg, var(--accent) 0 4px, transparent 4px 7px);
+  }
+  .sub { color: var(--muted); font-size: 12px; margin: 3px 0 0 14px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
+  .film { font-size: 15px; font-weight: 700; }
+  .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  /* 残り時間は遠目でも読めるように大きく */
+  .count { font-size: 46px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .02em; text-align: center; margin: 8px 0 2px; }
+  .count.soon { color: var(--accent); }
+  .count.past { color: var(--go); }
+  .clock { text-align: center; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; margin-top: 10px; }
+  .badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; font-weight: 700; border: 1px solid transparent; white-space: nowrap; }
+  .onsale { background: rgba(31,174,106,.16); color: #4fd894; border-color: rgba(31,174,106,.45); }
+  .presale { background: rgba(232,145,58,.16); color: #f0a95f; border-color: rgba(232,145,58,.45); }
+  .before { background: rgba(90,169,230,.14); color: #8fc6f0; border-color: rgba(90,169,230,.4); }
+  .closed, .unknown { background: #1f242b; color: var(--muted); border-color: #2b313a; }
+  .btns { display: flex; gap: 7px; margin-top: 12px; }
+  .btn {
+    flex: 1; text-align: center; padding: 12px 8px; border-radius: 8px; font-size: 14px; text-decoration: none;
+    border: 1px solid var(--line); background: var(--surface2); color: #c8ccd3; cursor: pointer; font-family: inherit;
+  }
+  .btn.go { background: var(--go); border-color: var(--go); color: #04170d; font-weight: 700; flex: 1.6; font-size: 16px; }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  input { background: var(--surface2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px; font-size: 15px; font-family: inherit; flex: 1; }
+  .small { font-size: 12px; color: var(--muted); }
+  .warn { color: var(--warn); font-weight: 700; }
+  .err { color: #f08a8a; }
+  #log { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: pre-wrap; max-height: 9em; overflow: hidden; margin-top: 8px; }
+  .note { color: var(--muted); font-size: 11px; margin: 12px 2px; line-height: 1.5; }
+</style>
+
+<header>
+  <h1>cinema-jump 待機</h1>
+  <div class="sub">販売開始の瞬間に座席選択へ自動で飛ぶ</div>
+</header>
+
+<div class="card">
+  <div class="film" id="film">読み込み中…</div>
+  <div class="meta" id="meta"></div>
+  <div class="count" id="count">--:--</div>
+  <div class="clock" id="clock"></div>
+  <div class="state">
+    <span class="badge unknown" id="badge">-</span>
+    <span id="seat"></span>
+    <span class="small" id="poll"></span>
+  </div>
+  <div class="btns">
+    <a class="btn go" id="go" href="#">今すぐ飛ぶ</a>
+    <button class="btn" id="copy">直URLコピー</button>
+  </div>
+  <div id="msg" class="small"></div>
+</div>
+
+<div class="card">
+  <div class="small">販売開始（<span id="src">-</span>）</div>
+  <div class="row">
+    <input type="datetime-local" id="at" step="1">
+    <button class="btn" id="apply" style="flex:0 0 auto">この時刻にする</button>
+  </div>
+  <div id="log"></div>
+</div>
+
+<div class="note">
+  ※ 画面を閉じたり他のアプリに切り替えると、ブラウザが処理を止めるので<b>この画面を表に出したまま</b>待て。
+  画面が勝手に消えないようにロックする（対応端末のみ）。<br>
+  ※ 開始60秒前から毎秒確認し、「販売中」になった瞬間に購入画面へ飛ぶ。
+  直URLがあるチェーンは、劇場側のデータが遅れても開始時刻を過ぎたら直URLへ飛ぶ。<br>
+  ※ 飛んだ先が「販売期間外」だったらこの画面に戻れ。戻ったあとは勝手に飛ばず、ボタンで再挑戦する。
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const P = new URLSearchParams(location.search);
+const th = P.get('th') || 'urasoe', d = P.get('d'), f = P.get('f'), t = P.get('t');
+const pad = (s) => s.replace(/^(\d):/, '0$1:');
+const KEY = `cj.wait.jumped:${th}/${d}/${f}/${t}`;
+
+// --- 状態 ---
+let offset = 0;            // サーバー時刻 − 端末時刻（ms）。端末の時計のズレを打ち消す
+let target = null;         // 販売開始時刻（ms）
+let targetSrc = '';        // '劇場データ' | '推定' | '手動'
+let screening = null;
+let stopped = false;
+let returned = false;      // 一度飛んで戻ってきた（＝向こうがまだ受け付けていなかった）
+let jumpedAt = 0;
+const now = () => Date.now() + offset;
+
+if (!d || !f || !t) {
+  $('film').textContent = 'URLが不完全（th・d・f・t が要る）';
+  $('film').className = 'film err';
+  stopped = true;
+}
+
+// 直前に飛んで戻ってきたか。10分以内なら「戻ってきた」扱いにして、時計だけを根拠に再び飛ばない
+try {
+  const j = +sessionStorage.getItem(KEY) || 0;
+  if (j && Date.now() - j < 10 * 60e3) returned = true;
+} catch {}
+window.addEventListener('pageshow', (e) => { if (e.persisted) { returned = true; note('戻ってきた。自動では飛ばない。ボタンで再挑戦しろ'); } });
+
+// --- 表示 ---
+const WD = '日月火水木金土';
+const fmtJst = (ms) => {
+  const j = new Date(ms + 9 * 3600e3);
+  return `${j.getUTCMonth() + 1}/${j.getUTCDate()}(${WD[j.getUTCDay()]}) `
+    + `${String(j.getUTCHours()).padStart(2, '0')}:${String(j.getUTCMinutes()).padStart(2, '0')}:${String(j.getUTCSeconds()).padStart(2, '0')}`;
+};
+// datetime-local は端末のタイムゾーン。JST 前提で組む（この道具は日本の映画館専用）
+const toLocalInput = (ms) => {
+  const j = new Date(ms + 9 * 3600e3);
+  return j.toISOString().slice(0, 19);
+};
+const fromLocalInput = (s) => +new Date(s + '+09:00');
+
+function note(s) {
+  const el = $('log');
+  const stamp = fmtJst(now()).slice(-8);
+  el.textContent = `${stamp} ${s}\n` + el.textContent;
+  const lines = el.textContent.split('\n');
+  if (lines.length > 8) el.textContent = lines.slice(0, 8).join('\n');
+}
+
+function tick() {
+  const n = now();
+  $('clock').textContent = `サーバー基準 ${fmtJst(n)}（端末との差 ${(offset / 1000).toFixed(1)}s）`;
+  const el = $('count');
+  if (!target) { el.textContent = '--:--'; el.className = 'count'; return; }
+  const lead = target - n;
+  if (lead <= 0) {
+    el.textContent = `+${(Math.min(-lead, 3599e3) / 1000).toFixed(1)}s`;
+    el.className = 'count past';
+    return;
+  }
+  const s = Math.floor(lead / 1000);
+  el.textContent = s >= 3600
+    ? `${Math.floor(s / 3600)}:${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+    : `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}.${Math.floor(lead % 1000 / 100)}`;
+  el.className = 'count' + (lead < 60e3 ? ' soon' : '');
+}
+setInterval(tick, 100);
+
+function render(j) {
+  $('film').textContent = j.name;
+  $('meta').textContent = `${th} ／ ${d} ${t}${screening ? `～${screening.end} ／ SCR ${screening.screen}` : ''}`;
+  if (!screening) return;
+  const LABEL = { onsale: '販売中', presale: '会員先行', before: '販売前', closed: '対象外' };
+  $('badge').textContent = LABEL[screening.status] || '-';
+  $('badge').className = `badge ${screening.status}`;
+  $('seat').textContent = screening.seat ? `空席 ${screening.seat}` : '';
+  const url = screening.jump || screening.direct || screening.bookmark;
+  $('go').href = url;
+  $('copy').disabled = !screening.direct;
+  $('copy').dataset.url = screening.direct || '';
+}
+
+// --- 飛ぶ ---
+function go(url, why) {
+  if (!url) return;
+  jumpedAt = Date.now();
+  try { sessionStorage.setItem(KEY, String(jumpedAt)); } catch {}
+  note(`飛ぶ（${why}）→ ${url}`);
+  stopped = true;
+  location.href = url;
+}
+
+// --- 販売開始時刻の決定 ---
+function setTarget(ms, src) {
+  if (!ms || isNaN(ms)) return;
+  target = ms; targetSrc = src;
+  $('src').textContent = src;
+  $('at').value = toLocalInput(ms);
+}
+// 劇場データに出ないチェーン（ユナイテッド等）は「上映日2日前の0:00」を仮置きする。
+// ユナイテッド浦添の実戦（2026-10 ディスクロージャー IMAX）で一般販売が日付変更と同時だったことに合わせた
+function guessTarget() {
+  const ms = +new Date(`${d}T00:00:00+09:00`) - 2 * 86400e3;
+  setTarget(ms, '推定：上映日2日前 0:00');
+}
+if (P.get('at')) setTarget(fromLocalInput(P.get('at')), '手動');
+$('apply').onclick = () => { setTarget(fromLocalInput($('at').value), '手動'); note(`開始時刻を手動で ${fmtJst(target)} に`); };
+
+// --- ポーリング ---
+async function poll() {
+  if (stopped) return;
+  const t0 = performance.now();
+  let j, status;
+  try {
+    const r = await fetch(`/api/go?th=${encodeURIComponent(th)}&d=${d}&f=${encodeURIComponent(f)}&json=1`, { cache: 'no-store' });
+    status = r.status;
+    j = await r.json();
+  } catch (e) {
+    note(`取得失敗: ${e.message}`);
+    return schedule();
+  }
+  const rtt = performance.now() - t0;
+  $('poll').textContent = `確認 ${rtt.toFixed(0)}ms`;
+  if (j.now) offset = new Date(j.now) - (Date.now() - rtt / 2);  // 往復の半分を引いて補正
+
+  if (status !== 200) {
+    note(`${status}: ${j.error || ''}`);
+    $('msg').textContent = j.error || `HTTP ${status}`;
+    $('msg').className = 'small err';
+    if (!target) guessTarget();
+    return schedule();
+  }
+  $('msg').textContent = '';
+  screening = (j.screenings || []).find((s) => s.time === t || s.time === pad(t)) || null;
+  render(j);
+  if (!screening) {
+    note(`${t} の回が見当たらない`);
+    return schedule();
+  }
+
+  // 販売開始時刻：劇場データ > 手動 > 推定
+  if (targetSrc !== '手動') {
+    const at = P.get('member') === '1' ? (screening.memberSaleStartAt || screening.saleStartAt) : screening.saleStartAt;
+    if (at) setTarget(+new Date(at), '劇場データ');
+    else if (!target) guessTarget();
+  }
+
+  // 1) データ上「販売中」になった → 購入URLへ（ユナイテッドは mc が出た＝確かな証拠）
+  if (screening.onSale && (screening.jump || screening.bookmark)) {
+    // 直URLがあるチェーンの「販売中」はサーバーの時計で判定しているだけなので、
+    // 一度戻ってきたあとは自動で飛ばない（向こうの受付が遅れている間に往復し続けるのを避ける）
+    if (returned && screening.saleStartAt) {
+      note('データ上は販売中。ボタンで再挑戦しろ');
+      return schedule();
+    }
+    return go(screening.jump || screening.bookmark, screening.status === 'presale' ? '会員先行' : '販売中');
+  }
+  // 2) 直URLがあるチェーンで開始時刻を過ぎた → データの更新を待たずに直URLへ
+  if (screening.direct && target && now() >= target + 300 && !returned) {
+    return go(screening.direct, '開始時刻を過ぎた');
+  }
+  if (screening.status === 'closed') {
+    note('販売対象外（上映済み・締切・満席）。止める');
+    stopped = true;
+    return;
+  }
+  schedule();
+}
+
+// 開始の2分前までは1分おき（関数を起こしておく）、そこからは毎秒。開始から15分過ぎても駄目なら諦める
+function schedule() {
+  if (stopped) return;
+  const lead = target ? target - now() : 0;
+  if (target && lead < -15 * 60e3) {
+    note('開始から15分経っても販売中にならない。止める');
+    $('msg').textContent = '開始から15分経過。日時の見当が違うか、販売自体がない';
+    $('msg').className = 'small warn';
+    stopped = true;
+    return;
+  }
+  const wait = lead > 120e3 ? 60e3 : lead < -60e3 ? 2000 : 1000;
+  setTimeout(poll, wait);
+}
+
+// --- 画面を消さない ---
+async function keepAwake() {
+  try {
+    if (navigator.wakeLock && document.visibilityState === 'visible') await navigator.wakeLock.request('screen');
+  } catch {}
+}
+document.addEventListener('visibilitychange', keepAwake);
+
+// --- ボタン ---
+$('go').onclick = (e) => {
+  e.preventDefault();
+  if (!screening) return;
+  go(screening.jump || screening.direct || screening.bookmark, '手動');
+};
+$('copy').onclick = async () => {
+  const b = $('copy');
+  if (!b.dataset.url) return;
+  try { await navigator.clipboard.writeText(b.dataset.url); b.textContent = 'コピーした ✓'; }
+  catch { b.textContent = b.dataset.url; }
+  setTimeout(() => { b.textContent = '直URLコピー'; }, 1600);
+};
+
+if (!stopped) {
+  if (returned) note('さっき飛んで戻ってきた。時計を根拠に自動では飛ばない。ボタンで再挑戦しろ');
+  keepAwake();
+  poll();
+}
+</script>
+</html>
