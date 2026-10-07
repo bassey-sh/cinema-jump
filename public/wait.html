@@ -285,7 +285,10 @@ function schedule() {
     stopped = true;
     return;
   }
-  const wait = lead > 120e3 ? 60e3 : lead < -60e3 ? 2000 : 1000;
+  // ユナイテッド（接頭辞なし）は2秒間隔。毎秒だと劇場側のページ生成中の空応答を引き続けるだけで、
+  // 開始の瞬間は予測URLの時刻ジャンプが担うので、ポーリングは「mcが出たか」の確認で足りる
+  const united = !/^(st|cs|ae|smt|c109|tj|toho)-/.test(th);
+  const wait = lead > 120e3 ? 60e3 : lead < -60e3 ? 2000 : united ? 2000 : 1000;
   setTimeout(poll, wait);
 }
 

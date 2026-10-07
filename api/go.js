@@ -29,6 +29,10 @@ export default async function handler(req, res) {
 
   const origin = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}`;
   const wantJson = json === '1';
+  // 人間がブラウザで開いた（ブックマークや「座席選択へ」）ときは、失敗をJSONで剥き出しにしない。
+  // 2026-10-07 21:00 の実戦で、503のJSONが「白い画面にチェックボックスと文字列」として見えて何が起きたか分からなかった
+  const asHtml = !wantJson && !!t && /text\/html/.test(req.headers.accept || '');
+  const waitUrl = f ? `${origin}/wait.html?th=${th}&d=${d}&f=${f}&t=${t}` : null;
 
   // --- チェーンごとにスケジュールを読む ---
   // src = { films, screeningsOf(film), jumpUrl(screening) }
@@ -37,10 +41,23 @@ export default async function handler(req, res) {
     const chain = resolveChain(th);
     src = chain ? await chain.load(th, d) : await loadUnited(th, d);
   } catch (e) {
-    return fail(res, e.status || 502, e.status ? e.message : `スケジュール取得に失敗: ${e.message}`);
+    const msg = e.status ? e.message : `スケジュール取得に失敗: ${e.message}`;
+    if (asHtml) return failHuman(res, e.status || 502, msg, { wait: waitUrl });
+    return fail(res, e.status || 502, msg);
   }
   const { films } = src;
-  if (!films.length) return fail(res, 404, `${d} のスケジュールはまだ公開されていない`);
+  if (!films.length) {
+    // 未公開の日付と、劇場サイトが混雑で中身の無いページを返したときの区別が付かない
+    // （2026-10-08 0:03 JST、一般販売開始の直後に浦添の daily.php が HTTP 200 で作品0件を返した）。
+    // どちらでも待機ページは叩き直すので、人間にはその両方を伝える
+    // ユナイテッドは空応答のとき本文が "<!-- cached:M -->" の17バイトだけになる（2026-10-08 0:08 JST に捕捉。
+    // 数秒〜数十秒の窓で断続的に出て、クエリを変えても同じ＝URLキーのキャッシュではなく生成中の状態）
+    const msg = src.empty
+      ? `${d} のスケジュールが劇場サイトから空で返った（ページ生成中。数秒おきに取り直せば出る）`
+      : `${d} のスケジュールが取れない（まだ未公開か、劇場サイトが混雑中）`;
+    if (asHtml) return failHuman(res, 503, msg, { wait: waitUrl });
+    return fail(res, 503, msg);
+  }
 
   // --- 対象作品の決定 ---
   let target;
@@ -93,6 +110,10 @@ export default async function handler(req, res) {
     const why = hit.status === 'before'
       ? (hit.saleStart ? `まだ販売前（${hit.saleStart} から購入可）` : 'まだ販売前（mc未生成）')
       : '販売対象外（上映済み・販売締切・満席のいずれか）';
+    if (asHtml) {
+      return failHuman(res, 503, `${why}：${target.name} ${d} ${t}`,
+        { wait: hit.status === 'before' ? hit.wait : null, direct: hit.predicted ? hit.direct : null });
+    }
     return fail(res, 503, `${why}：${target.name} ${d} ${t}`, { screenings });
   }
   // 外部サイト由来の遷移と判定されてトップへ飛ばされるのを避ける
@@ -123,7 +144,8 @@ async function loadUnited(th, d) {
     films.push({ film: m[1], name: decodeEntities(m[2].trim()) });
   }
 
-  return { films, screeningsOf, jumpUrl };
+  // empty: 劇場側のページ生成中に返る中身の無い応答（本文がコメント1行だけ）
+  return { films, screeningsOf, jumpUrl, empty: !films.length && /^\s*<!--[^>]*-->\s*$/.test(html) };
 
   async function screeningsOf(film) {
     const screenings = parseScreenings(filmBlock(html, film));
@@ -277,6 +299,21 @@ function ok(res, wantJson, data, renderHtml) {
 
 function fail(res, code, message, extra = {}) {
   return res.status(code).json({ error: message, ...extra });
+}
+
+// 人間向けの失敗ページ。次に押すべきものだけを置く
+//   wait   : 待機ページ（販売前の回のとき）
+//   direct : 予測した購入URL（販売前でもユナイテッド側に直接当たれる）
+function failHuman(res, code, message, { wait, direct } = {}) {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  const btn = (href, label, go) => `<p><a class="${go ? 'go' : ''}" href="${esc(href)}">${esc(label)}</a></p>`;
+  return res.status(code).send(PAGE('まだ座席選択へ進めない',
+    `<p>${esc(message)}</p>`
+    + (direct ? btn(direct, '予測した購入URLを直接開く', true)
+      + '<p style="color:#888;font-size:12px">※ 販売開始前に開いても劇場側で弾かれる。開始時刻を過ぎてから押せ</p>' : '')
+    + (wait ? btn(wait, '待機ページで販売開始と同時に自動で飛ぶ', !direct) : '')
+    + '<p style="color:#888;font-size:12px">この画面が出るのは、まだ販売開始前か、劇場のスケジュールページが取れなかったとき。</p>'));
 }
 
 const PAGE = (title, body) => `<!doctype html><meta charset="utf-8">

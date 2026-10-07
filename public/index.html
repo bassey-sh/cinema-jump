@@ -354,8 +354,12 @@ async function loadScreenings(film) {
               : s.status === 'before'
                 ? `<a class="btn go" href="${esc(s.wait)}">待機して自動で飛ぶ</a>`
                 : '<button class="btn" disabled>販売対象外</button>'}
-            <button class="btn copy" data-url="${esc(s.bookmark)}">URLをコピー</button>
-            ${s.direct ? `<button class="btn copy" data-url="${esc(s.direct)}">${s.predicted ? '予測URLコピー' : '直URLコピー'}</button>` : ''}
+            ${s.predicted
+              // 予測URL（他の日の販売リンクから組んだ）は開く・コピーの両方。ツール経由のURLは要らない
+              ? `<a class="btn" href="${esc(s.direct)}">予測URLを開く</a>
+                 <button class="btn copy" data-url="${esc(s.direct)}">予測URLコピー</button>`
+              : `<button class="btn copy" data-url="${esc(s.bookmark)}">URLをコピー</button>
+                 ${s.direct ? `<button class="btn copy" data-url="${esc(s.direct)}">直URLコピー</button>` : ''}`}
           </div>
         </div>`).join('') +
         `<div class="note">※ 「待機」は販売開始の瞬間に自動で購入画面へ飛ぶページ。開始前に開いて、画面を表に出したまま待て。<br>
