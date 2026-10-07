@@ -170,7 +170,8 @@ setInterval(tick, 100);
 
 function render(j) {
   $('film').textContent = j.name;
-  $('meta').textContent = `${th} ／ ${d} ${t}${screening ? `～${screening.end} ／ SCR ${screening.screen}` : ''}`;
+  $('meta').textContent = `${th} ／ ${d} ${t}${screening ? `～${screening.end} ／ SCR ${screening.screen}` : ''}`
+    + (screening?.predicted ? ' ／ 購入URLは予測（他の日の販売リンクから組んだ）' : '');
   if (!screening) return;
   const LABEL = { onsale: '販売中', presale: '会員先行', before: '販売前', closed: '対象外' };
   $('badge').textContent = LABEL[screening.status] || '-';

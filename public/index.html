@@ -355,13 +355,15 @@ async function loadScreenings(film) {
                 ? `<a class="btn go" href="${esc(s.wait)}">待機して自動で飛ぶ</a>`
                 : '<button class="btn" disabled>販売対象外</button>'}
             <button class="btn copy" data-url="${esc(s.bookmark)}">URLをコピー</button>
-            ${s.direct ? `<button class="btn copy" data-url="${esc(s.direct)}">直URLコピー</button>` : ''}
+            ${s.direct ? `<button class="btn copy" data-url="${esc(s.direct)}">${s.predicted ? '予測URLコピー' : '直URLコピー'}</button>` : ''}
           </div>
         </div>`).join('') +
         `<div class="note">※ 「待機」は販売開始の瞬間に自動で購入画面へ飛ぶページ。開始前に開いて、画面を表に出したまま待て。<br>
             ※ 直URLは購入画面そのもののURL。このツールを経由しないので販売中の回はこれが一番速い</div>`
         + (['star', 'sunshine', 'aeon', 'smt'].includes(chainOf()) ? '<div class="note">※ このチェーンは販売前でも直URLが作れる。販売前に開くと「販売期間外」と出る</div>' : '')
-        + (chainOf() === 'united' ? '<div class="note">※ ユナイテッドの直URLは販売開始後にしか作れない（購入システム側のIDが開始時に生成される）。開始の瞬間は「待機」を使え</div>' : '')
+        + (chainOf() === 'united' ? `<div class="note">※ ユナイテッドの直URLは本来、販売開始後にしか作れない（購入システム側のIDが開始時に生成される）。
+            ただし同じ作品が前日・前々日に販売中なら、そのIDを借りて<b>予測URL</b>を組む。待機ページは開始時刻にこれを叩くので、スケジュールページが混雑で落ちていても飛べる。
+            予測が出ない作品（まだどの日も販売されていない新作）は「待機」でスケジュールの更新を待つしかない</div>` : '')
         + (chainOf() === 'toho' ? '<div class="note">※ TOHOは購入がPOST送信のため直URLを作れない。「座席選択へ」を押すと自動送信ページを経由し、TOHO側の「ログインせずに購入する」を1回押す必要がある</div>' : '')
         : '<div class="msg">上映回が取得できなかった</div>');
     $('back').onclick = renderFilms;

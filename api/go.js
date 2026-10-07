@@ -61,7 +61,7 @@ export default async function handler(req, res) {
     return ok(res, wantJson, { date: d, theater: th, films }, () => renderFilms(origin, th, d, films));
   }
 
-  const screenings = src.screeningsOf(target.film).map((s) => {
+  const screenings = (await src.screeningsOf(target.film)).map((s) => {
     // jump: 販売中なら、このツールを経由せず開ける購入URL（TOHOはPOSTなので無し）。
     // 待機ページはこれへ直接飛ぶので、販売開始の瞬間に関数の往復1回ぶんを節約できる
     const j = s.onSale ? src.jumpUrl(s) : null;
@@ -112,11 +112,7 @@ async function loadUnited(th, d) {
   const sd = d.replace(/-/g, '');
 
   // --- スケジュールHTML取得（Shift_JIS） ---
-  const r = await fetch(`https://www.unitedcinemas.jp/${th}/daily.php?date=${d}`, {
-    headers: { 'User-Agent': UA }, cache: 'no-store',
-  });
-  if (!r.ok) throw Object.assign(new Error(`スケジュール取得に失敗 (HTTP ${r.status})`), { status: 502 });
-  const html = new TextDecoder('shift_jis').decode(await r.arrayBuffer());
+  const html = await fetchDaily(th, d);
 
   // --- その日の全作品（上映方式ごとに別レコード） ---
   const films = [];
@@ -129,12 +125,45 @@ async function loadUnited(th, d) {
 
   return { films, screeningsOf, jumpUrl };
 
-  function screeningsOf(film) {
-    // --- 対象作品ブロックを切り出す ---
-    const i = html.indexOf(`film=${film}`);
-    const j = html.indexOf('film.php?film=', i + 10);
-    const block = html.slice(i, j < 0 ? undefined : j);
+  async function screeningsOf(film) {
+    const screenings = parseScreenings(filmBlock(html, film));
 
+    // --- 販売前の回の購入URLを「予測」する ---
+    // mc（購入システム側の作品ID）は作品×上映方式ごとに1つで、日付が変わっても同じ
+    // （2026-10-07 ディスクロージャーIMAX 浦添：10/8〜10/10 の3日とも mc=25261・tc=049 で確認）。
+    // だから同じ作品が前日・前々日に販売中なら、その mc を借りて販売前の回のURLを先に組める。
+    // 販売開始の瞬間にスケジュールページが混雑で落ちていても、組んだURLを時刻で叩けばいい
+    // （2026-10-07 21:00 の会員先行で、スケジュールページが90秒以上取れずに取り逃した反省）。
+    if (screenings.some((s) => !s.onSale && s.status === 'before')) {
+      let known = screenings.find((s) => s.mc);          // 同じ日に販売中の回があればそれを使う
+      if (!known) {
+        for (const back of [1, 2]) {
+          try {
+            const pd = shiftDate(d, -back);
+            const prev = parseScreenings(filmBlock(await fetchDaily(th, pd), film), pd.replace(/-/g, ''));
+            known = prev.find((s) => s.mc);
+          } catch { /* 前日が取れなくても本日分は返す */ }
+          if (known) break;
+        }
+      }
+      if (known) {
+        for (const s of screenings) {
+          if (s.onSale || s.status !== 'before') continue;
+          const base = { tc: known.tc, mc: known.mc, screen: s.screen, st: s.st };
+          s.predicted = true;
+          s.directPresale = jumpUrl({ ...base, presale: true });   // 会員先行（上映3日前21:00〜）
+          s.directGeneral = jumpUrl({ ...base, presale: false });  // 一般（上映2日前0:00〜）
+          // 一般販売の開始前なら会員先行の入口を、過ぎていれば一般の入口を既定にする
+          const general = new Date(`${d}T00:00:00+09:00`).getTime() - 2 * 86400e3;
+          s.direct = Date.now() < general ? s.directPresale : s.directGeneral;
+        }
+      }
+    }
+    return screenings;
+  }
+
+  // block: 1作品ぶんのHTML。sdLocal: その block の日付（YYYYMMDD。前日のHTMLを渡すときに指定する）
+  function parseScreenings(block, sdLocal = sd) {
     // --- 販売中の回（購入リンクが生成されている＝mc 確定） ---
     // 通常販売   : /all/cc.php        → /pticket/schedule.php へ転送される
     // 会員先行販売: /clubspice/presale.php → そのまま叩く（CLUB-SPICE会員の先行期間）
@@ -157,7 +186,7 @@ async function loadUnited(th, d) {
         if (!time) continue;
         const chunk = cell.slice(0, 1500); // 次の回のHTMLを巻き込まない範囲
         const end = (chunk.match(/<li class="endTime">\s*[～~]?\s*(\d{1,2}:\d{2})/) || [])[1] || '';
-        const st = sd + time.replace(':', '') + '00';
+        const st = sdLocal + time.replace(':', '') + '00';
         const hit = sold[st];
         const status = hit ? (hit.presale ? 'presale' : 'onsale')
           : /outside_sales_period/.test(chunk) ? 'before' : 'closed';
@@ -186,6 +215,29 @@ async function loadUnited(th, d) {
     return `https://www.unitedcinemas.jp${path}`
       + `?tc=${hit.tc}&sd=${sd}&sc=${hit.screen}&st=${hit.st}&mc=${hit.mc}`;
   }
+}
+
+// ユナイテッドの上映スケジュールHTML（Shift_JIS）を取る
+async function fetchDaily(th, d) {
+  const r = await fetch(`https://www.unitedcinemas.jp/${th}/daily.php?date=${d}`, {
+    headers: { 'User-Agent': UA }, cache: 'no-store',
+  });
+  if (!r.ok) throw Object.assign(new Error(`スケジュール取得に失敗 (HTTP ${r.status})`), { status: 502 });
+  return new TextDecoder('shift_jis').decode(await r.arrayBuffer());
+}
+
+// スケジュールHTMLから1作品ぶんのブロックを切り出す（見当たらなければ空文字）
+function filmBlock(html, film) {
+  const i = html.indexOf(`film=${film}`);
+  if (i < 0) return '';
+  const j = html.indexOf('film.php?film=', i + 10);
+  return html.slice(i, j < 0 ? undefined : j);
+}
+
+// YYYY-MM-DD を days 日ずらす（JSTの日付として）
+function shiftDate(d, days) {
+  return new Date(new Date(`${d}T00:00:00+09:00`).getTime() + days * 86400e3 + 9 * 3600e3)
+    .toISOString().slice(0, 10);
 }
 
 // POSTでしか購入画面に入れないチェーン用。開いた瞬間に自動送信する中継ページ
