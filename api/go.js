@@ -19,6 +19,7 @@ import { resolveChain } from '../lib/chains.js';
 const UA = 'Mozilla/5.0 (compatible; cinema-jump/1.0)';
 
 export default async function handler(req, res) {
+  res.cjT0 = Date.now();  // 受付時刻。返事に処理時間（took）を付けて、待機ページの時計補正から差し引かせる
   const { th = 'urasoe', d, q, f, t, json } = req.query;
 
   // --- 入力検証（パスに使うので緩く通さない） ---
@@ -290,15 +291,23 @@ const decodeEntities = (s) => s
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// now : 返事を出す瞬間のサーバー時刻。待機ページが端末の時計のズレを補正するのに使う
+// took: 受付から返事までの処理時間（ms）。劇場サイト待ちで数秒かかることがあり、
+//       これを引かずに「往復の半分」で補正すると端末の時計を進めすぎる（2026-11-11 往復4.3秒で約1秒ズレた）
+function stamp(res) {
+  const n = Date.now();
+  return { now: new Date(n).toISOString(), took: res.cjT0 ? n - res.cjT0 : null };
+}
+
 function ok(res, wantJson, data, renderHtml) {
-  // now: サーバー時刻。待機ページが端末の時計のズレを補正するのに使う
-  if (wantJson) return res.status(200).json({ ...data, now: new Date().toISOString() });
+  if (wantJson) return res.status(200).json({ ...data, ...stamp(res) });
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   return res.status(200).send(renderHtml());
 }
 
+// 503（販売前・mc未生成）の間も時計補正を続けられるよう、失敗応答にも時刻を載せる
 function fail(res, code, message, extra = {}) {
-  return res.status(code).json({ error: message, ...extra });
+  return res.status(code).json({ error: message, ...extra, ...stamp(res) });
 }
 
 // 人間向けの失敗ページ。次に押すべきものだけを置く

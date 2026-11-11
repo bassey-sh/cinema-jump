@@ -114,6 +114,15 @@ let returned = false;      // 一度飛んで戻ってきた（＝向こうが�
 let jumpedAt = 0;
 const now = () => Date.now() + offset;
 
+// 時計補正：直近10回のうち回線往復が一番短かった回を採る（往復が短いほど補正の誤差が小さい）。
+// 1回ごとに上書きすると、起動待ちや回線の詰まりで往復が伸びた回に補正が引きずられる
+const clockSamples = [];
+function addClockSample(off, net) {
+  clockSamples.push({ off, net });
+  if (clockSamples.length > 10) clockSamples.shift();
+  offset = clockSamples.reduce((a, b) => (b.net < a.net ? b : a)).off;
+}
+
 if (!d || !f || !t) {
   $('film').textContent = 'URLが不完全（th・d・f・t が要る）';
   $('film').className = 'film err';
@@ -227,8 +236,12 @@ async function poll() {
     return schedule();
   }
   const rtt = performance.now() - t0;
-  $('poll').textContent = `確認 ${rtt.toFixed(0)}ms`;
-  if (j.now) offset = new Date(j.now) - (Date.now() - rtt / 2);  // 往復の半分を引いて補正
+  // サーバーの処理時間（took）を引いた残りが回線の往復。サーバー時刻は返事を出す瞬間なので、
+  // 「受け取った時刻 − 回線往復の半分」と突き合わせる。took が無い（古いサーバー）ときは往復全体で代用
+  const took = Number.isFinite(j.took) ? j.took : null;
+  const net = took == null ? rtt : Math.max(0, rtt - took);
+  $('poll').textContent = took == null ? `確認 ${rtt.toFixed(0)}ms` : `確認 ${rtt.toFixed(0)}ms（回線 ${net.toFixed(0)}ms）`;
+  if (j.now) addClockSample(new Date(j.now) - (Date.now() - net / 2), net);
 
   if (status !== 200) {
     note(`${status}: ${j.error || ''}`);
