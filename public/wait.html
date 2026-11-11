@@ -114,6 +114,9 @@
     <input type="datetime-local" id="at" step="1">
     <button class="btn" id="apply" style="flex:0 0 auto">この時刻にする</button>
   </div>
+  <div class="row small" id="kindRow" style="display:none">
+    待つ枠 <select id="kind"></select>
+  </div>
   <div class="row small">
     戻ってきたあと、もう一度飛ぶまで
     <select id="gap"><option>3</option><option selected>5</option><option>10</option><option>30</option></select> 秒
@@ -128,7 +131,9 @@
   飛んだ先から戻ってくると、上で選んだ秒数をおいてもう一度飛ぶ。<br>
   ※ 「自分で押す」：勝手には飛ばない。飛べる状態になったら、帯の点滅と振動（対応端末のみ）で知らせる。<br>
   ※ 劇場データの確認は、開始2分前までは1分おき、そこからはユナイテッドが2秒おき・ほかは毎秒。開始から15分たっても販売中にならなければ止まる。
-  開始時刻で飛ぶ判定は確認の返事を待たず、0.1秒刻みで見ている。
+  開始時刻で飛ぶ判定は確認の返事を待たず、0.1秒刻みで見ている。<br>
+  ※ 開始時刻は、劇場データに出ていればそれ、出ていなければチェーンの販売ルール（公式）から置く。会員先行があるチェーンは「待つ枠」で会員先行か一般かを選べ（チェーンごとに覚える）。
+  劇場の都合でずれることがあるので、劇場のお知らせと違ったら時刻を手で直せ。
 </div>
 
 <script>
@@ -141,7 +146,33 @@ const KEY = `cj.wait.jumped:${ID}`;   // 最後に飛んだ時刻
 const MKEY = `cj.wait.mode:${ID}`;    // 自動 / 手動（この回だけ覚える）
 const CKEY = `cj.wait.count:${ID}`;   // 飛んだ回数
 const GKEY = 'cj.wait.gap';           // 再挑戦までの秒数（全部の回で共通）
-const united = !/^(st|cs|ae|smt|c109|tj|toho)-/.test(th);
+// 劇場スラッグの接頭辞でチェーンを見分ける（接頭辞なし＝ユナイテッド。lib/chains.js と同じ規則）
+const PREFIX = { 'st-': 'star', 'cs-': 'sunshine', 'ae-': 'aeon', 'smt-': 'smt', 'c109-': 'c109', 'tj-': 'tjoy', 'toho-': 'toho' };
+const chain = Object.entries(PREFIX).find(([p]) => th.startsWith(p))?.[1] || 'united';
+const united = chain === 'united';
+
+// チェーン別のネット販売開始（公式の出典は README「チェーン別のネット販売開始」。2026-11-11 確認）
+//   d = 上映日の何日前か、t = 時刻。member が無いチェーンは会員先行なし
+const RULES = {
+  united:   { member: { d: 3, t: '21:00', who: 'CLUB-SPICE会員' }, general: { d: 2, t: '00:00' } },
+  star:     { general: { d: 2, t: '00:00' } },   // 公式は「2日前から」で時刻の明記なし（実データは0:00）
+  sunshine: { member: { d: 3, t: '21:00', who: 'BRONZE・GOLD会員。PLATINUMは20:30' }, general: { d: 2, t: '00:00' } },
+  aeon:     { member: { d: 3, t: '18:00', who: 'ワタシアタープラス会員' }, general: { d: 2, t: '00:00' } },
+  smt:      { member: { d: 3, t: '17:00', who: 'SMT Members' }, general: { d: 3, t: '21:00' } },   // 松竹は一般も3日前21:00
+  c109:     { member: { d: 3, t: '21:00', who: 'シネマポイント会員' }, general: { d: 2, t: '00:00' } },
+  tjoy:     { general: { d: 2, t: '00:00' } },
+  toho:     { member: { d: 3, t: '21:00', who: 'TOHO-ONE会員' }, general: { d: 2, t: '00:00' } },
+};
+const RULE = RULES[chain];
+// 会員先行で待つか一般で待つか。URLの member=1/0 > チェーンごとに覚えた値 > 既定（会員のユナイテッドだけ会員先行）
+const MEMKEY = `cj.member:${chain}`;
+let asMember = (() => {
+  if (!RULE.member) return false;
+  const p = P.get('member');
+  if (p === '1' || p === '0') return p === '1';
+  try { const v = localStorage.getItem(MEMKEY); if (v === '1' || v === '0') return v === '1'; } catch {}
+  return united;
+})();
 const ss = {
   get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { sessionStorage.setItem(k, v); } catch {} },
@@ -340,15 +371,39 @@ function setTarget(ms, src) {
   $('src').textContent = src;
   $('at').value = toLocalInput(ms);
 }
-// 劇場データに開始時刻が出ないチェーンは、販売ルールから置く。
-//   ユナイテッド（接頭辞なし）：会員のネット購入＝鑑賞日3日前の21:00、一般は2日前0:00
-//     （unitedcinemas.jp/information/schedule_update.html。劇場の都合でずれることがあるので、外れたら手動で直す）
-//   それ以外（109・TOHO・松竹・T・ジョイ）：一般＝上映日2日前の0:00（目安）
+// 劇場データに開始時刻が出ないチェーン（ユナイテッド・松竹・109・TOHO・T・ジョイ）は、販売ルールから置く。
+// 劇場の都合でずれることがあるので、外れたら手動で直す
 function ruleTarget() {
-  const ms = united
-    ? +new Date(`${d}T21:00:00+09:00`) - 3 * 86400e3
-    : +new Date(`${d}T00:00:00+09:00`) - 2 * 86400e3;
-  setTarget(ms, united ? '販売ルール：上映日3日前 21:00（会員）' : '目安：上映日2日前 0:00');
+  const r = (asMember && RULE.member) || RULE.general;
+  const ms = +new Date(`${d}T${r.t}:00+09:00`) - r.d * 86400e3;
+  const who = r === RULE.member ? r.who : RULE.member ? '一般' : '';
+  setTarget(ms, `${chain === 'star' ? '目安' : '販売ルール'}：上映日${r.d}日前 ${r.t.replace(/^0/, '')}${who ? `（${who}）` : ''}`);
+}
+// 劇場データ（SMART THEATER 系）に開始時刻があればそれを、無ければ販売ルールを使う
+function dataSaleStart() {
+  if (!screening) return null;
+  return asMember ? (screening.memberSaleStartAt || screening.saleStartAt) : screening.saleStartAt;
+}
+function retarget() {
+  if (targetSrc === '手動') return;
+  const at = dataSaleStart();
+  if (at) setTarget(+new Date(at), '劇場データ');
+  else ruleTarget();
+}
+// 待つ枠の選択（会員先行があるチェーンだけ出す）
+if (RULE.member) {
+  $('kindRow').style.display = '';
+  $('kind').innerHTML = `<option value="1">会員先行（${RULE.member.who}）</option><option value="0">一般</option>`;
+  $('kind').value = asMember ? '1' : '0';
+  $('kind').onchange = () => {
+    asMember = $('kind').value === '1';
+    try { localStorage.setItem(MEMKEY, asMember ? '1' : '0'); } catch {}
+    retarget();
+    note(`待つ枠を「${asMember ? '会員先行' : '一般'}」にした → 開始 ${fmtJst(target)}`);
+    // 15分経過で止まっていたら、新しい開始時刻で確認を再開する
+    if (stopped && stopReason.startsWith('開始から15分')) { stopped = false; stopReason = ''; $('msg').textContent = ''; }
+    if (!stopped && !leaving && !polling) schedule();
+  };
 }
 if (P.get('at')) setTarget(fromLocalInput(P.get('at')), '手動');
 $('apply').onclick = () => { setTarget(fromLocalInput($('at').value), '手動'); note(`開始時刻を手動で ${fmtJst(target)} に`); };
@@ -392,9 +447,9 @@ async function poll() {
     return schedule();
   }
 
-  // 販売開始時刻：劇場データ > 手動 > 販売ルール
+  // 販売開始時刻：手動 > 劇場データ > 販売ルール
   if (targetSrc !== '手動') {
-    const at = P.get('member') === '1' ? (screening.memberSaleStartAt || screening.saleStartAt) : screening.saleStartAt;
+    const at = dataSaleStart();
     if (at) setTarget(+new Date(at), '劇場データ');
     else if (!target) ruleTarget();
   }

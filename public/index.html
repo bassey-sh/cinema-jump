@@ -171,10 +171,8 @@ const PREFIX_CHAIN = { 'st-': 'star', 'cs-': 'sunshine', 'ae-': 'aeon', 'smt-': 
 const chainOf = () => (S.theaters.find((t) => t.slug === S.theater) || {}).chain
   || Object.entries(PREFIX_CHAIN).find(([p]) => S.theater.startsWith(p))?.[1] || 'united';
 
-// 販売開始の目安。実際の日時は各上映回のデータから出すので、ここは「見当をつける」用
-//   ユナイテッド・シネマ：会員（CLUB-SPICE）が上映日の3日前 21:00 ※実測からの推定
-//   スターシアターズ／シネマサンシャイン：上映日の2日前 0:00 ※公式の規約・FAQに明記
-//   イオンシネマ：公式ルール未確認。各回のデータに任せる
+// チェーン別のネット販売開始（公式の出典は README「チェーン別のネット販売開始」。2026-11-11 確認）。
+// SMART THEATER 系（スター・サンシャイン・イオン）は回ごとの実際の開始日時もデータに出る
 function saleStart(dateStr, daysBefore, time) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() - daysBefore);
@@ -182,40 +180,32 @@ function saleStart(dateStr, daysBefore, time) {
 }
 
 function saleBanner() {
-  const chain = chainOf();
-  if (chain === 'united') {
-    return `<div class="sale">
-      会員販売開始: <b>${saleStart(S.date, 3, '21:00')}</b>
-      <div class="note">※ ユナイテッドの販売ルールで、会員のネット購入は鑑賞日3日前の21:00、会員以外は2日前の0:00から。劇場の都合でずれることがある（劇場のお知らせを確認）</div></div>`;
+  const day = (n, t) => saleStart(S.date, n, t);
+  const box = (label, when, note) => `<div class="sale">
+      ${label}: <b>${when}</b>
+      <div class="note">※ ${note}</div></div>`;
+  const tail = '一部の作品・イベント上映は例外あり。劇場の都合でずれることもある（劇場のお知らせを確認）';
+  const noData = '回ごとの開始日時はデータに出ないので、この時刻で判断しろ';
+  const inData = '各回の実際の開始日時は上映回一覧に出る';
+  switch (chainOf()) {
+    case 'united':
+      return box('会員販売開始', day(3, '21:00'), `CLUB-SPICE会員は鑑賞日3日前の21:00、会員以外は2日前の0:00（${day(2, '0:00')}）から。${noData}。${tail}`);
+    case 'smt':
+      return box('一般販売開始', day(3, '21:00'), `松竹は会員以外も鑑賞日3日前の21:00から。SMT Members会員は3日前の17:00（${day(3, '17:00')}）から。${noData}。${tail}`);
+    case 'c109':
+      return box('一般販売開始', day(2, '0:00'), `シネマポイント会員は鑑賞日3日前の21:00（${day(3, '21:00')}）から。${noData}。${tail}`);
+    case 'toho':
+      return box('一般販売開始', day(2, '0:00'), `TOHO-ONE会員は鑑賞日3日前の21:00（${day(3, '21:00')}）から（ログインした状態のみ・ライトプランは対象外）。${noData}。${tail}`);
+    case 'sunshine':
+      return box('一般販売開始', day(2, '0:00'), `会員はPLATINUMが3日前の20:30（2枚まで）、BRONZE・GOLDが3日前の21:00（${day(3, '21:00')}）から。${inData}。${tail}`);
+    case 'aeon':
+      return box('一般販売開始', day(2, '0:00'), `ワタシアタープラス会員は鑑賞日3日前の18:00（${day(3, '18:00')}）から。${inData}。${tail}`);
+    case 'star':
+      return box('オンライン購入開始', day(2, '0:00'), `公式は「2日前から」で時刻の明記はない（実データでは0:00）。会員先行はない。${inData}。${tail}`);
+    case 'tjoy':
+      return box('掲載＝販売開始', '当日＋2日先まで', 'T・ジョイは鑑賞日2日前の0:00から買える（KINEZO。無料の会員登録が要る）。会員先行はない。スケジュールは販売開始と同時に出るので、先の日付はまだ出ない');
   }
-  // 上映日2日前0:00から一般発売、というチェーン。会員先行の有無だけが違う
-  const TWO_DAYS = {
-    star: '通常作品に会員先行はない',
-    sunshine: '会員先行は3日前20:30（PLATINUM）／21:00（BRONZE・GOLD）',
-    c109: 'シネマポイント会員は3日前21:00から',
-    toho: 'TOHO-ONE会員は3日前21:00から（ログインが要る）',
-  };
-  if (TWO_DAYS[chain]) {
-    const detail = chain === 'star' || chain === 'sunshine'
-      ? '各回の実際の開始日時は上映回一覧に出る'
-      : 'このチェーンは回ごとの販売開始日時がデータに出ないので、この目安で判断しろ';
-    return `<div class="sale">
-      オンライン購入開始: <b>${saleStart(S.date, 2, '0:00')}</b>
-      <div class="note">※ 公式規約・FAQで「鑑賞日2日前0:00から」。${TWO_DAYS[chain]}。一部作品は例外あり。${detail}</div></div>`;
-  }
-  if (chain === 'aeon') {
-    return `<div class="sale">
-      オンライン購入開始: <b>各上映回の表示を見ろ</b>
-      <div class="note">※ 実測では上映日2日前0:00（会員はその前日18:00）。公式ルールは未確認なので、各回の実データを出している</div></div>`;
-  }
-  if (chain === 'tjoy') {
-    return `<div class="sale">
-      掲載＝販売開始: <b>当日＋2日先まで</b>
-      <div class="note">※ T・ジョイはスケジュールが出た時点で買える。先の日付はまだ出ない</div></div>`;
-  }
-  return `<div class="sale">
-      購入開始: <b>各上映回の表示を見ろ</b>
-      <div class="note">※ このチェーンは公式の販売開始ルールが未確認</div></div>`;
+  return box('購入開始', '各上映回の表示を見ろ', 'このチェーンの販売開始ルールは未確認');
 }
 
 async function api(params) {
