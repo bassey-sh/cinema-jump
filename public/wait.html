@@ -40,6 +40,25 @@
   .presale { background: rgba(232,145,58,.16); color: #f0a95f; border-color: rgba(232,145,58,.45); }
   .before { background: rgba(90,169,230,.14); color: #8fc6f0; border-color: rgba(90,169,230,.4); }
   .closed, .unknown { background: #1f242b; color: var(--muted); border-color: #2b313a; }
+
+  /* いま誰が飛ぶのか（この画面か、自分か）を一目で分かるようにする帯 */
+  .mode { margin-top: 12px; border-radius: 8px; padding: 10px 12px; border: 1px solid var(--line); background: var(--surface2); }
+  .mode .title { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .mode .detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .mode.auto { border-color: rgba(31,174,106,.5); background: rgba(31,174,106,.10); }
+  .mode.auto .title { color: #4fd894; }
+  .mode.manual { border-color: rgba(232,180,74,.5); background: rgba(232,180,74,.10); }
+  .mode.manual .title { color: var(--accent); }
+  .mode.ready { border-color: var(--warn); background: rgba(232,145,58,.22); animation: blink 1s steps(2) infinite; }
+  .mode.ready .title { color: #ffc183; }
+  .mode.stop .title { color: var(--muted); }
+  @keyframes blink { 50% { background: rgba(232,145,58,.08); } }
+  .seg { display: flex; margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; padding: 10px 6px; font-size: 14px; font-family: inherit; background: var(--surface2); color: var(--muted); border: 0; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--surface); color: var(--text); font-weight: 700; box-shadow: inset 0 -3px 0 var(--accent); }
+  .poll { font-size: 12px; color: var(--muted); margin-top: 8px; font-variant-numeric: tabular-nums; }
+
   .btns { display: flex; gap: 7px; margin-top: 12px; }
   .btn {
     flex: 1; text-align: center; padding: 12px 8px; border-radius: 8px; font-size: 14px; text-decoration: none;
@@ -48,7 +67,8 @@
   .btn.go { background: var(--go); border-color: var(--go); color: #04170d; font-weight: 700; flex: 1.6; font-size: 16px; }
   .btn:disabled { opacity: .45; cursor: default; }
   .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
-  input { background: var(--surface2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px; font-size: 15px; font-family: inherit; flex: 1; }
+  input, select { background: var(--surface2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px; font-size: 15px; font-family: inherit; }
+  input { flex: 1; }
   .small { font-size: 12px; color: var(--muted); }
   .warn { color: var(--warn); font-weight: 700; }
   .err { color: #f08a8a; }
@@ -69,8 +89,18 @@
   <div class="state">
     <span class="badge unknown" id="badge">-</span>
     <span id="seat"></span>
-    <span class="small" id="poll"></span>
   </div>
+
+  <div class="mode" id="mode">
+    <div class="title" id="modeTitle">-</div>
+    <div class="detail" id="modeDetail"></div>
+  </div>
+  <div class="seg">
+    <button id="mAuto">自動で飛ぶ</button>
+    <button id="mManual">自分で押す</button>
+  </div>
+  <div class="poll" id="poll"></div>
+
   <div class="btns">
     <a class="btn go" id="go" href="#">今すぐ飛ぶ</a>
     <button class="btn" id="copy">直URLコピー</button>
@@ -84,34 +114,54 @@
     <input type="datetime-local" id="at" step="1">
     <button class="btn" id="apply" style="flex:0 0 auto">この時刻にする</button>
   </div>
+  <div class="row small">
+    戻ってきたあと、もう一度飛ぶまで
+    <select id="gap"><option>3</option><option selected>5</option><option>10</option><option>30</option></select> 秒
+  </div>
   <div id="log"></div>
 </div>
 
 <div class="note">
-  ※ 画面を閉じたり他のアプリに切り替えると、ブラウザが処理を止めるので<b>この画面を表に出したまま</b>待て。
+  ※ <b>この画面を表に出したまま</b>待て。画面を閉じたり他のアプリに切り替えると、ブラウザが処理を止める。
   画面が勝手に消えないようにロックする（対応端末のみ）。<br>
-  ※ 開始60秒前から毎秒確認し、「販売中」になった瞬間に購入画面へ飛ぶ。
-  直URLがあるチェーンは、劇場側のデータが遅れても開始時刻を過ぎたら直URLへ飛ぶ。<br>
-  ※ 飛んだ先が「販売期間外」だったらこの画面に戻れ。戻ったあとは勝手に飛ばず、ボタンで再挑戦する。
+  ※ 「自動で飛ぶ」：開始時刻になったら（直URLがある回）、または劇場データが販売中になったら、この画面が勝手に購入画面へ飛ぶ。
+  飛んだ先から戻ってくると、上で選んだ秒数をおいてもう一度飛ぶ。<br>
+  ※ 「自分で押す」：勝手には飛ばない。飛べる状態になったら、帯の点滅と振動（対応端末のみ）で知らせる。<br>
+  ※ 劇場データの確認は、開始2分前までは1分おき、そこからはユナイテッドが2秒おき・ほかは毎秒。開始から15分たっても販売中にならなければ止まる。
+  開始時刻で飛ぶ判定は確認の返事を待たず、0.1秒刻みで見ている。
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
-const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) =>
-  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const P = new URLSearchParams(location.search);
 const th = P.get('th') || 'urasoe', d = P.get('d'), f = P.get('f'), t = P.get('t');
 const pad = (s) => s.replace(/^(\d):/, '0$1:');
-const KEY = `cj.wait.jumped:${th}/${d}/${f}/${t}`;
+const ID = `${th}/${d}/${f}/${t}`;
+const KEY = `cj.wait.jumped:${ID}`;   // 最後に飛んだ時刻
+const MKEY = `cj.wait.mode:${ID}`;    // 自動 / 手動（この回だけ覚える）
+const CKEY = `cj.wait.count:${ID}`;   // 飛んだ回数
+const GKEY = 'cj.wait.gap';           // 再挑戦までの秒数（全部の回で共通）
+const united = !/^(st|cs|ae|smt|c109|tj|toho)-/.test(th);
+const ss = {
+  get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { sessionStorage.setItem(k, v); } catch {} },
+};
 
 // --- 状態 ---
 let offset = 0;            // サーバー時刻 − 端末時刻（ms）。端末の時計のズレを打ち消す
 let target = null;         // 販売開始時刻（ms）
-let targetSrc = '';        // '劇場データ' | '推定' | '手動'
+let targetSrc = '';        // '劇場データ' | '販売ルール' | '目安' | '手動'
 let screening = null;
-let stopped = false;
-let returned = false;      // 一度飛んで戻ってきた（＝向こうがまだ受け付けていなかった）
-let jumpedAt = 0;
+let stopped = false;       // もう確認しない（対象外・15分経過・URL不備）
+let stopReason = '';
+let leaving = false;       // 飛んでいる最中（ページ遷移待ち）
+let returned = false;      // 一度飛んで戻ってきた
+let retryAt = 0;           // 戻ってきたあと、自動で再挑戦してよい時刻（端末時計 ms）
+let mode = ss.get(MKEY) === 'manual' ? 'manual' : 'auto';
+let gap = 5;
+try { gap = +localStorage.getItem(GKEY) || 5; } catch {}
+let pollTimer = 0, polling = false, nextPollAt = 0, pollEvery = 0, lastPoll = '';
+let wasReady = false;
 const now = () => Date.now() + offset;
 
 // 時計補正：直近10回のうち回線往復が一番短かった回を採る（往復が短いほど補正の誤差が小さい）。
@@ -123,18 +173,19 @@ function addClockSample(off, net) {
   offset = clockSamples.reduce((a, b) => (b.net < a.net ? b : a)).off;
 }
 
-if (!d || !f || !t) {
-  $('film').textContent = 'URLが不完全（th・d・f・t が要る）';
-  $('film').className = 'film err';
-  stopped = true;
+function stop(reason) {
+  stopped = true; stopReason = reason;
+  clearTimeout(pollTimer);
+  note(reason);
 }
 
-// 直前に飛んで戻ってきたか。10分以内なら「戻ってきた」扱いにして、時計だけを根拠に再び飛ばない
-try {
-  const j = +sessionStorage.getItem(KEY) || 0;
-  if (j && Date.now() - j < 10 * 60e3) returned = true;
-} catch {}
-window.addEventListener('pageshow', (e) => { if (e.persisted) { returned = true; note('戻ってきた。自動では飛ばない。ボタンで再挑戦しろ'); } });
+// 戻ってきたときの扱い：自動なら gap 秒おいて再挑戦、手動なら何もしない
+function markReturned(why) {
+  returned = true; leaving = false;
+  retryAt = Date.now() + gap * 1000;
+  note(mode === 'auto' ? `${why}。飛べる状態なら${gap}秒後にもう一度飛ぶ` : `${why}。手動なので自分で押せ`);
+}
+// 戻ってきたかの判定は、表示の部品（note・hms）が定義されたあと＝スクリプト末尾で行う
 
 // --- 表示 ---
 const WD = '日月火水木金土';
@@ -143,37 +194,100 @@ const fmtJst = (ms) => {
   return `${j.getUTCMonth() + 1}/${j.getUTCDate()}(${WD[j.getUTCDay()]}) `
     + `${String(j.getUTCHours()).padStart(2, '0')}:${String(j.getUTCMinutes()).padStart(2, '0')}:${String(j.getUTCSeconds()).padStart(2, '0')}`;
 };
+const hms = (ms) => fmtJst(ms).slice(-8);
 // datetime-local は端末のタイムゾーン。JST 前提で組む（この道具は日本の映画館専用）
-const toLocalInput = (ms) => {
-  const j = new Date(ms + 9 * 3600e3);
-  return j.toISOString().slice(0, 19);
-};
+const toLocalInput = (ms) => new Date(ms + 9 * 3600e3).toISOString().slice(0, 19);
 const fromLocalInput = (s) => +new Date(s + '+09:00');
+const sec = (ms) => `${Math.max(0, ms / 1000).toFixed(1)}秒`;
 
 function note(s) {
   const el = $('log');
-  const stamp = fmtJst(now()).slice(-8);
-  el.textContent = `${stamp} ${s}\n` + el.textContent;
+  el.textContent = `${hms(now())} ${s}\n` + el.textContent;
   const lines = el.textContent.split('\n');
   if (lines.length > 8) el.textContent = lines.slice(0, 8).join('\n');
+}
+
+// いま飛べるか。飛べるならその先と理由を返す
+function ready() {
+  if (!screening) return null;
+  if (screening.onSale && (screening.jump || screening.bookmark)) {
+    return { url: screening.jump || screening.bookmark, why: screening.status === 'presale' ? '劇場データが会員先行になった' : '劇場データが販売中になった' };
+  }
+  if (screening.direct && target && now() >= target + 300) return { url: screening.direct, why: '開始時刻を過ぎた（直URL）' };
+  return null;
+}
+
+// 自動のときに飛ぶ。開始時刻の判定は確認の返事を待たずに 0.1 秒刻みで見る
+function tryAuto() {
+  if (stopped || leaving || mode !== 'auto') return;
+  const r = ready();
+  if (!r) return;
+  if (returned && Date.now() < retryAt) return;
+  go(r.url, returned ? `${r.why}・再挑戦` : r.why);
+}
+
+function renderMode() {
+  const r = ready();
+  let cls, title, detail = '';
+  if (stopped) {
+    cls = 'stop'; title = '止まっている'; detail = stopReason;
+  } else if (leaving) {
+    cls = 'auto'; title = '飛んでいる…'; detail = '劇場のページが開くのを待っている';
+  } else if (mode === 'auto') {
+    cls = 'auto';
+    if (r && returned && Date.now() < retryAt) {
+      title = `自動：${sec(retryAt - Date.now())}後にもう一度飛ぶ`;
+      detail = `戻ってきたので${gap}秒おいて再挑戦する（${r.why}）。止めたいなら「自分で押す」に切り替えろ`;
+    } else if (r) {
+      title = '自動：いま飛ぶ'; detail = r.why;
+    } else if (screening?.direct && target) {
+      title = `自動：${hms(target)} になったら飛ぶ`;
+      detail = 'それより前に劇場データが販売中になったら、その時点で飛ぶ。触らなくていい';
+    } else if (screening) {
+      title = '自動：劇場データが販売中になったら飛ぶ';
+      detail = '直URLが無い回なので、開始時刻では飛ばない。触らなくていい';
+    } else {
+      title = '自動：上映回の情報を待っている';
+    }
+  } else {
+    if (r) { cls = 'ready'; title = '手動：もう飛べる。「今すぐ飛ぶ」を押せ'; detail = r.why; }
+    else { cls = 'manual'; title = '手動：この画面は勝手に飛ばない'; detail = '飛べる状態になったら、ここが点滅して知らせる。押すのは自分'; }
+  }
+  // 手動で「飛べる」になった瞬間に一度だけ振動
+  if (mode === 'manual' && r && !wasReady) { try { navigator.vibrate?.([200, 100, 200]); } catch {} }
+  wasReady = !!r;
+  const el = $('mode');
+  el.className = `mode ${cls}`;
+  $('modeTitle').textContent = title;
+  $('modeDetail').textContent = detail;
+  $('mAuto').className = mode === 'auto' ? 'on' : '';
+  $('mManual').className = mode === 'manual' ? 'on' : '';
+  const count = +ss.get(CKEY) || 0;
+  const nextIn = polling ? '確認中…' : stopped || leaving ? '-' : `次まで ${sec(nextPollAt - Date.now())}`;
+  $('poll').textContent = (pollEvery ? `劇場データの確認：${pollEvery / 1000}秒おき（${nextIn}）` : '劇場データの確認：初回')
+    + (lastPoll ? ` ／ 前回 ${lastPoll}` : '') + (count ? ` ／ 飛んだ回数 ${count}` : '');
 }
 
 function tick() {
   const n = now();
   $('clock').textContent = `サーバー基準 ${fmtJst(n)}（端末との差 ${(offset / 1000).toFixed(1)}s）`;
   const el = $('count');
-  if (!target) { el.textContent = '--:--'; el.className = 'count'; return; }
-  const lead = target - n;
-  if (lead <= 0) {
-    el.textContent = `+${(Math.min(-lead, 3599e3) / 1000).toFixed(1)}s`;
-    el.className = 'count past';
-    return;
+  if (!target) { el.textContent = '--:--'; el.className = 'count'; }
+  else {
+    const lead = target - n;
+    if (lead <= 0) {
+      el.textContent = `+${(Math.min(-lead, 3599e3) / 1000).toFixed(1)}s`;
+      el.className = 'count past';
+    } else {
+      const s = Math.floor(lead / 1000);
+      el.textContent = s >= 3600
+        ? `${Math.floor(s / 3600)}:${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
+        : `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}.${Math.floor(lead % 1000 / 100)}`;
+      el.className = 'count' + (lead < 60e3 ? ' soon' : '');
+    }
   }
-  const s = Math.floor(lead / 1000);
-  el.textContent = s >= 3600
-    ? `${Math.floor(s / 3600)}:${String(Math.floor(s % 3600 / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
-    : `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}.${Math.floor(lead % 1000 / 100)}`;
-  el.className = 'count' + (lead < 60e3 ? ' soon' : '');
+  tryAuto();
+  renderMode();
 }
 setInterval(tick, 100);
 
@@ -186,8 +300,7 @@ function render(j) {
   $('badge').textContent = LABEL[screening.status] || '-';
   $('badge').className = `badge ${screening.status}`;
   $('seat').textContent = screening.seat ? `空席 ${screening.seat}` : '';
-  const url = screening.jump || screening.direct || screening.bookmark;
-  $('go').href = url;
+  $('go').href = screening.jump || screening.direct || screening.bookmark;
   $('copy').disabled = !screening.direct;
   $('copy').dataset.url = screening.direct || '';
 }
@@ -195,12 +308,30 @@ function render(j) {
 // --- 飛ぶ ---
 function go(url, why) {
   if (!url) return;
-  jumpedAt = Date.now();
-  try { sessionStorage.setItem(KEY, String(jumpedAt)); } catch {}
+  leaving = true;
+  clearTimeout(pollTimer);
+  ss.set(KEY, String(Date.now()));
+  ss.set(CKEY, String((+ss.get(CKEY) || 0) + 1));
   note(`飛ぶ（${why}）→ ${url}`);
-  stopped = true;
   location.href = url;
 }
+
+// --- 自動 / 手動の切り替え ---
+function setMode(m) {
+  if (m === mode) return;
+  mode = m; ss.set(MKEY, m);
+  // 自動に戻した瞬間に飛ぶと驚くので、もう飛べる状態でも gap 秒の猶予を置く
+  if (m === 'auto' && ready()) { returned = true; retryAt = Date.now() + gap * 1000; }
+  note(m === 'auto' ? '「自動で飛ぶ」にした' : '「自分で押す」にした。この画面は勝手に飛ばない');
+}
+$('mAuto').onclick = () => setMode('auto');
+$('mManual').onclick = () => setMode('manual');
+$('gap').value = String(gap);
+$('gap').onchange = () => {
+  gap = +$('gap').value || 5;
+  try { localStorage.setItem(GKEY, String(gap)); } catch {}
+  if (returned && retryAt > Date.now()) retryAt = Date.now() + gap * 1000;
+};
 
 // --- 販売開始時刻の決定 ---
 function setTarget(ms, src) {
@@ -209,22 +340,23 @@ function setTarget(ms, src) {
   $('src').textContent = src;
   $('at').value = toLocalInput(ms);
 }
-// 劇場データに出ないチェーンは目安を仮置きする。
-//   ユナイテッド（接頭辞なし）：CLUB-SPICE会員先行＝上映日3日前の21:00（浦添の実戦で確認。一般は2日前0:00）
-//   それ以外（109・TOHO・松竹・T・ジョイ）：一般＝上映日2日前の0:00
-function guessTarget() {
-  const united = !/^(st|cs|ae|smt|c109|tj|toho)-/.test(th);
+// 劇場データに開始時刻が出ないチェーンは、販売ルールから置く。
+//   ユナイテッド（接頭辞なし）：会員のネット購入＝鑑賞日3日前の21:00、一般は2日前0:00
+//     （unitedcinemas.jp/information/schedule_update.html。劇場の都合でずれることがあるので、外れたら手動で直す）
+//   それ以外（109・TOHO・松竹・T・ジョイ）：一般＝上映日2日前の0:00（目安）
+function ruleTarget() {
   const ms = united
     ? +new Date(`${d}T21:00:00+09:00`) - 3 * 86400e3
     : +new Date(`${d}T00:00:00+09:00`) - 2 * 86400e3;
-  setTarget(ms, united ? '推定：上映日3日前 21:00（会員先行）' : '推定：上映日2日前 0:00');
+  setTarget(ms, united ? '販売ルール：上映日3日前 21:00（会員）' : '目安：上映日2日前 0:00');
 }
 if (P.get('at')) setTarget(fromLocalInput(P.get('at')), '手動');
 $('apply').onclick = () => { setTarget(fromLocalInput($('at').value), '手動'); note(`開始時刻を手動で ${fmtJst(target)} に`); };
 
 // --- ポーリング ---
 async function poll() {
-  if (stopped) return;
+  if (stopped || leaving || polling) return;
+  polling = true;
   const t0 = performance.now();
   let j, status;
   try {
@@ -232,22 +364,24 @@ async function poll() {
     status = r.status;
     j = await r.json();
   } catch (e) {
+    polling = false;
     note(`取得失敗: ${e.message}`);
     return schedule();
   }
+  polling = false;
   const rtt = performance.now() - t0;
   // サーバーの処理時間（took）を引いた残りが回線の往復。サーバー時刻は返事を出す瞬間なので、
   // 「受け取った時刻 − 回線往復の半分」と突き合わせる。took が無い（古いサーバー）ときは往復全体で代用
   const took = Number.isFinite(j.took) ? j.took : null;
   const net = took == null ? rtt : Math.max(0, rtt - took);
-  $('poll').textContent = took == null ? `確認 ${rtt.toFixed(0)}ms` : `確認 ${rtt.toFixed(0)}ms（回線 ${net.toFixed(0)}ms）`;
+  lastPoll = took == null ? `${rtt.toFixed(0)}ms` : `${rtt.toFixed(0)}ms（回線 ${net.toFixed(0)}ms）`;
   if (j.now) addClockSample(new Date(j.now) - (Date.now() - net / 2), net);
 
   if (status !== 200) {
     note(`${status}: ${j.error || ''}`);
     $('msg').textContent = j.error || `HTTP ${status}`;
     $('msg').className = 'small err';
-    if (!target) guessTarget();
+    if (!target) ruleTarget();
     return schedule();
   }
   $('msg').textContent = '';
@@ -258,51 +392,32 @@ async function poll() {
     return schedule();
   }
 
-  // 販売開始時刻：劇場データ > 手動 > 推定
+  // 販売開始時刻：劇場データ > 手動 > 販売ルール
   if (targetSrc !== '手動') {
     const at = P.get('member') === '1' ? (screening.memberSaleStartAt || screening.saleStartAt) : screening.saleStartAt;
     if (at) setTarget(+new Date(at), '劇場データ');
-    else if (!target) guessTarget();
+    else if (!target) ruleTarget();
   }
-
-  // 1) データ上「販売中」になった → 購入URLへ（ユナイテッドは mc が出た＝確かな証拠）
-  if (screening.onSale && (screening.jump || screening.bookmark)) {
-    // 直URLがあるチェーンの「販売中」はサーバーの時計で判定しているだけなので、
-    // 一度戻ってきたあとは自動で飛ばない（向こうの受付が遅れている間に往復し続けるのを避ける）
-    if (returned && screening.saleStartAt) {
-      note('データ上は販売中。ボタンで再挑戦しろ');
-      return schedule();
-    }
-    return go(screening.jump || screening.bookmark, screening.status === 'presale' ? '会員先行' : '販売中');
-  }
-  // 2) 直URLがあるチェーンで開始時刻を過ぎた → データの更新を待たずに直URLへ
-  if (screening.direct && target && now() >= target + 300 && !returned) {
-    return go(screening.direct, '開始時刻を過ぎた');
-  }
-  if (screening.status === 'closed') {
-    note('販売対象外（上映済み・締切・満席）。止める');
-    stopped = true;
-    return;
-  }
+  if (screening.status === 'closed') return stop('販売対象外（上映済み・締切・満席）なので止めた');
+  tryAuto();
   schedule();
 }
 
 // 開始の2分前までは1分おき（関数を起こしておく）、そこからは毎秒。開始から15分過ぎても駄目なら諦める
 function schedule() {
-  if (stopped) return;
+  if (stopped || leaving) return;
   const lead = target ? target - now() : 0;
   if (target && lead < -15 * 60e3) {
-    note('開始から15分経っても販売中にならない。止める');
     $('msg').textContent = '開始から15分経過。日時の見当が違うか、販売自体がない';
     $('msg').className = 'small warn';
-    stopped = true;
-    return;
+    return stop('開始から15分たっても販売中にならないので止めた');
   }
-  // ユナイテッド（接頭辞なし）は2秒間隔。毎秒だと劇場側のページ生成中の空応答を引き続けるだけで、
+  // ユナイテッドは2秒間隔。毎秒だと劇場側のページ生成中の空応答を引き続けるだけで、
   // 開始の瞬間は予測URLの時刻ジャンプが担うので、ポーリングは「mcが出たか」の確認で足りる
-  const united = !/^(st|cs|ae|smt|c109|tj|toho)-/.test(th);
-  const wait = lead > 120e3 ? 60e3 : lead < -60e3 ? 2000 : united ? 2000 : 1000;
-  setTimeout(poll, wait);
+  pollEvery = lead > 120e3 ? 60e3 : lead < -60e3 ? 2000 : united ? 2000 : 1000;
+  nextPollAt = Date.now() + pollEvery;
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(poll, pollEvery);
 }
 
 // --- 画面を消さない ---
@@ -327,8 +442,24 @@ $('copy').onclick = async () => {
   setTimeout(() => { b.textContent = '直URLコピー'; }, 1600);
 };
 
+if (!d || !f || !t) {
+  $('film').textContent = 'URLが不完全（th・d・f・t が要る）';
+  $('film').className = 'film err';
+  stop('URLが不完全');
+}
+// 直前（10分以内）に飛んでいたら「戻ってきた」扱い
+{
+  const j = +ss.get(KEY) || 0;
+  if (j && Date.now() - j < 10 * 60e3) markReturned('さっき飛んで戻ってきた');
+}
+// 戻るボタンでキャッシュから復元されたときは、止まっていた確認を再開する
+window.addEventListener('pageshow', (e) => {
+  if (!e.persisted) return;
+  markReturned('戻ってきた');
+  if (!stopped) { polling = false; poll(); }
+});
+
 if (!stopped) {
-  if (returned) note('さっき飛んで戻ってきた。時計を根拠に自動では飛ばない。ボタンで再挑戦しろ');
   keepAwake();
   poll();
 }

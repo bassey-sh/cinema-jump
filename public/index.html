@@ -185,8 +185,8 @@ function saleBanner() {
   const chain = chainOf();
   if (chain === 'united') {
     return `<div class="sale">
-      会員販売開始（推定）: <b>${saleStart(S.date, 3, '21:00')}</b>
-      <div class="note">※ 上映日3日前の21:00。実測からの推定で公式確認は未取得</div></div>`;
+      会員販売開始: <b>${saleStart(S.date, 3, '21:00')}</b>
+      <div class="note">※ ユナイテッドの販売ルールで、会員のネット購入は鑑賞日3日前の21:00、会員以外は2日前の0:00から。劇場の都合でずれることがある（劇場のお知らせを確認）</div></div>`;
   }
   // 上映日2日前0:00から一般発売、というチェーン。会員先行の有無だけが違う
   const TWO_DAYS = {
